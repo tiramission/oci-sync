@@ -117,8 +117,13 @@ func packFile(tw *tar.Writer, srcFile, name string) error {
 // Unpack extracts the tar.gz archive bytes into destPath.
 // If destPath does not exist, it will be created.
 func Unpack(data []byte, destPath string) error {
-	if err := os.MkdirAll(destPath, 0o755); err != nil {
-		return fmt.Errorf("create dest dir %s: %w", destPath, err)
+	absDestPath, err := filepath.Abs(destPath)
+	if err != nil {
+		return fmt.Errorf("get absolute dest path: %w", err)
+	}
+
+	if err := os.MkdirAll(absDestPath, 0o755); err != nil {
+		return fmt.Errorf("create dest dir %s: %w", absDestPath, err)
 	}
 
 	gr, err := gzip.NewReader(bytes.NewReader(data))
@@ -138,11 +143,8 @@ func Unpack(data []byte, destPath string) error {
 		}
 
 		// Security: prevent path traversal
-		targetPath := filepath.Join(destPath, hdr.Name)
-		if !strings.HasPrefix(
-			filepath.Clean(targetPath)+string(os.PathSeparator),
-			filepath.Clean(destPath)+string(os.PathSeparator),
-		) {
+		targetPath := filepath.Join(absDestPath, hdr.Name)
+		if !strings.HasPrefix(targetPath, absDestPath+string(os.PathSeparator)) && targetPath != absDestPath {
 			return fmt.Errorf("illegal file path in archive: %s", hdr.Name)
 		}
 
