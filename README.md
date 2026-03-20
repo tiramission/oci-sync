@@ -4,16 +4,27 @@
 
 ## 安装
 
+### 使用 Go
 ```bash
 go install github.com/tiramission/oci-sync@latest
 ```
 
 或从源码构建：
-
 ```bash
 git clone https://github.com/tiramission/oci-sync.git
 cd oci-sync
 go build -o oci-sync .
+```
+
+### 使用 Nix (Flake)
+本项目已提供 `flake.nix`，Nix 用户可直接运行：
+```bash
+nix run github:tiramission/oci-sync -- --help
+```
+
+开发者也可直接进入开发环境：
+```bash
+nix develop github:tiramission/oci-sync
 ```
 
 ## 前置条件
