@@ -1,0 +1,23 @@
+# Binaries
+oci-sync
+
+# Go build/coverage files
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Editor files
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Go modules
+vendor/
+
+# Temporary/IDE
+/tmp/
