@@ -1,0 +1,6 @@
+oci-sync
+temps/
+*.test
+*.out
+.DS_Store
+Thumbs.db
