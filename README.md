@@ -64,6 +64,13 @@ oci-sync pull registry.example.com/myrepo:encrypted ./output --passphrase mypass
 oci-sync delete registry.example.com/myrepo:latest
 ```
 
+### list — 列出仓库中的文件镜像
+
+```bash
+# 检索远程仓库中所有由本工具上传的文件镜像记录
+oci-sync list registry.example.com/myrepo
+```
+
 ### 参数说明
 
 | 参数 | 说明 |

@@ -45,3 +45,11 @@ oci-sync delete <remote_path>
 ```
 
 - remote_path 格式为 `<registry>/<repository>:<tag>`
+
+4. list
+
+```bash
+oci-sync list <remote_repo>
+```
+
+- remote_repo 格式为 `<registry>/<repository>`

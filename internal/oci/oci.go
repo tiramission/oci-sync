@@ -208,3 +208,66 @@ func Delete(ctx context.Context, ref string) error {
 
 	return nil
 }
+
+// ArtifactInfo represents metadata of an artifact pushed by oci-sync.
+type ArtifactInfo struct {
+	Tag       string
+	Digest    string
+	Encrypted bool
+	Version   string
+}
+
+// List retrieves all oci-sync artifacts in the specified repository.
+func List(ctx context.Context, repoRef string) ([]ArtifactInfo, error) {
+	repo, err := newRepository(ctx, repoRef)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []ArtifactInfo
+
+	err = repo.Tags(ctx, "", func(tags []string) error {
+		for _, tag := range tags {
+			// Resolve tag to descriptor
+			desc, err := repo.Resolve(ctx, tag)
+			if err != nil {
+				continue
+			}
+
+			// Fetch manifest bytes
+			rc, err := repo.Fetch(ctx, desc)
+			if err != nil {
+				continue
+			}
+			data, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				continue
+			}
+
+			// Parse manifest
+			var manifest ocispec.Manifest
+			if err := json.Unmarshal(data, &manifest); err != nil {
+				continue
+			}
+
+			// Check custom annotations
+			if val, ok := manifest.Annotations["io.oci-sync.version"]; ok {
+				encStr := manifest.Annotations["io.oci-sync.encrypted"]
+				results = append(results, ArtifactInfo{
+					Tag:       tag,
+					Digest:    desc.Digest.String(),
+					Encrypted: encStr == "true",
+					Version:   val,
+				})
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("list tags failed: %w", err)
+	}
+
+	return results, nil
+}
