@@ -4,3 +4,4 @@ temps/
 *.out
 .DS_Store
 Thumbs.db
+result
