@@ -80,7 +80,8 @@ oci-sync list registry.example.com
 |------|------|
 | `local_path` | 本地文件或目录路径 |
 | `remote_path` | OCI 仓库引用，格式：`<registry>/<repository>:<tag>` |
-| `--passphrase` | 加密/解密口令（可选） |
+| `--passphrase`| 加密/解密口令（可选） |
+| `--quiet`, `-q` | 开启静默模式，仅输出错误信息 |
 
 ## 工作原理
 

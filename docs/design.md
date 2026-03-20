@@ -67,7 +67,7 @@ oci-sync/
 ├── docs/
 │   └── design.md                  # 本设计文档
 ├── cmd/
-│   ├── root.go                    # 根命令 & 全局配置
+│   ├── root.go                    # 根命令 & 全局配置（--quiet / -q）
 │   ├── push.go                    # push 子命令
 │   ├── pull.go                    # pull 子命令
 │   ├── delete.go                  # delete 子命令
@@ -187,6 +187,7 @@ oci-sync push <local_path> <remote_path> [--passphrase <passphrase>]
 | `local_path` | ✓ | 本地文件或目录路径 |
 | `remote_path` | ✓ | 目标仓库引用，格式：`<registry>/<repo>:<tag>` |
 | `--passphrase` | 否 | 加密口令，不提供则不加密 |
+| `--quiet`, `-q` | 否 | 静默模式，全局生效 |
 
 ### pull
 

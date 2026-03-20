@@ -8,6 +8,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var quiet bool
+
 var rootCmd = &cobra.Command{
 	Use:   "oci-sync",
 	Short: "Sync local files to OCI-compatible image registries",
@@ -15,6 +17,15 @@ var rootCmd = &cobra.Command{
 and pushes them as OCI artifacts to OCI-compatible image registries.
 Authentication uses Docker credential store (compatible with docker login).`,
 	Version: "0.1.0",
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Configure logger based on flags
+		if quiet {
+			log.SetLevel(log.ErrorLevel)
+		} else {
+			log.SetLevel(log.InfoLevel)
+		}
+		log.SetTimeFormat("15:04:05")
+	},
 }
 
 // Execute runs the root command.
@@ -26,9 +37,7 @@ func Execute() {
 }
 
 func init() {
-	// Configure logger
-	log.SetLevel(log.InfoLevel)
-	log.SetTimeFormat("15:04:05")
+	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Omit informational output")
 
 	rootCmd.AddCommand(newPushCmd())
 	rootCmd.AddCommand(newPullCmd())
