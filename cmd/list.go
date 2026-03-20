@@ -42,7 +42,7 @@ func runList(ctx context.Context, repoPath string) error {
 
 	// Print tab-separated table
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "TAG\tENCRYPTED\tVERSION\tDIGEST")
+	fmt.Fprintln(w, "REPO\tTAG\tENCRYPTED\tVERSION\tDIGEST")
 	for _, a := range artifacts {
 		encStr := "yes"
 		if !a.Encrypted {
@@ -53,7 +53,7 @@ func runList(ctx context.Context, repoPath string) error {
 		if len(digestShort) > 15 {
 			digestShort = digestShort[:15] + "..."
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", a.Tag, encStr, a.Version, digestShort)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.Repo, a.Tag, encStr, a.Version, digestShort)
 	}
 	w.Flush()
 

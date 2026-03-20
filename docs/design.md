@@ -218,7 +218,7 @@ oci-sync list <remote_repo>
 
 | 参数 | 必选 | 说明 |
 |------|------|------|
-| `remote_repo` | ✓ | 目标仓库源，不需要 tag，格式：`<registry>/<repo>` |
+| `remote_repo` | ✓ | 目标仓库源或注册表，格式：`<registry>/<repo>` 或 `<registry>` |
 
 ---
 

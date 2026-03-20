@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
@@ -211,30 +212,66 @@ func Delete(ctx context.Context, ref string) error {
 
 // ArtifactInfo represents metadata of an artifact pushed by oci-sync.
 type ArtifactInfo struct {
+	Repo      string
 	Tag       string
 	Digest    string
 	Encrypted bool
 	Version   string
 }
 
-// List retrieves all oci-sync artifacts in the specified repository.
-func List(ctx context.Context, repoRef string) ([]ArtifactInfo, error) {
-	repo, err := newRepository(ctx, repoRef)
+// List retrieves all oci-sync artifacts in the specified repository or registry.
+func List(ctx context.Context, ref string) ([]ArtifactInfo, error) {
+	// 1. Try treating as a repository first (contains '/')
+	if strings.Contains(ref, "/") {
+		repo, err := newRepository(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		return listRepoTags(ctx, repo)
+	}
+
+	// 2. Treat as a registry host
+	reg, err := newRegistry(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
 
 	var results []ArtifactInfo
+	err = reg.Repositories(ctx, "", func(repos []string) error {
+		for _, repoName := range repos {
+			// Construct full repo path
+			fullRepoRef := ref + "/" + repoName
+			repo, err := newRepository(ctx, fullRepoRef)
+			if err != nil {
+				continue
+			}
+			infos, err := listRepoTags(ctx, repo)
+			if err == nil {
+				results = append(results, infos...)
+			}
+		}
+		return nil
+	})
 
-	err = repo.Tags(ctx, "", func(tags []string) error {
+	if err != nil {
+		return nil, fmt.Errorf("list repositories failed: %w", err)
+	}
+
+	return results, nil
+}
+
+// listRepoTags is a helper to list all tags in a given repository.
+func listRepoTags(ctx context.Context, repo *remote.Repository) ([]ArtifactInfo, error) {
+	var results []ArtifactInfo
+	repoName := repo.Reference.Repository
+
+	err := repo.Tags(ctx, "", func(tags []string) error {
 		for _, tag := range tags {
-			// Resolve tag to descriptor
 			desc, err := repo.Resolve(ctx, tag)
 			if err != nil {
 				continue
 			}
 
-			// Fetch manifest bytes
 			rc, err := repo.Fetch(ctx, desc)
 			if err != nil {
 				continue
@@ -245,16 +282,15 @@ func List(ctx context.Context, repoRef string) ([]ArtifactInfo, error) {
 				continue
 			}
 
-			// Parse manifest
 			var manifest ocispec.Manifest
 			if err := json.Unmarshal(data, &manifest); err != nil {
 				continue
 			}
 
-			// Check custom annotations
-			if val, ok := manifest.Annotations["io.oci-sync.version"]; ok {
-				encStr := manifest.Annotations["io.oci-sync.encrypted"]
+			if val, ok := manifest.Annotations[AnnotationVersion]; ok {
+				encStr := manifest.Annotations[AnnotationEncrypted]
 				results = append(results, ArtifactInfo{
+					Repo:      repoName,
 					Tag:       tag,
 					Digest:    desc.Digest.String(),
 					Encrypted: encStr == "true",
@@ -264,10 +300,28 @@ func List(ctx context.Context, repoRef string) ([]ArtifactInfo, error) {
 		}
 		return nil
 	})
+	return results, err
+}
 
+func newRegistry(ctx context.Context, host string) (*remote.Registry, error) {
+	reg, err := remote.NewRegistry(host)
 	if err != nil {
-		return nil, fmt.Errorf("list tags failed: %w", err)
+		return nil, fmt.Errorf("parse registry %q: %w", host, err)
 	}
 
-	return results, nil
+	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{
+		AllowPlaintextPut: false,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load docker credential store: %w", err)
+	}
+
+	reg.Client = &auth.Client{
+		Client:     retry.DefaultClient,
+		Cache:      auth.DefaultCache,
+		Credential: credentials.Credential(credStore),
+	}
+
+	return reg, nil
 }
+

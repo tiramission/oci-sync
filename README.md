@@ -67,8 +67,11 @@ oci-sync delete registry.example.com/myrepo:latest
 ### list — 列出仓库中的文件镜像
 
 ```bash
-# 检索远程仓库中所有由本工具上传的文件镜像记录
+# 检索远程仓库中特定路径的文件镜像
 oci-sync list registry.example.com/myrepo
+
+# 检索整个注册表下的所有由本工具上传的镜像记录
+oci-sync list registry.example.com
 ```
 
 ### 参数说明

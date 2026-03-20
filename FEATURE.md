@@ -49,7 +49,10 @@ oci-sync delete <remote_path>
 4. list
 
 ```bash
-oci-sync list <remote_repo>
+# 列出特定仓库的 tags
+oci-sync list <registry>/<repository>
+# 列出整个注册表的所有镜像仓库
+oci-sync list <registry>
 ```
 
-- remote_repo 格式为 `<registry>/<repository>`
+- remote_repo 格式为 `<registry>/<repository>` 或单个 `<registry>`
