@@ -7,6 +7,7 @@
 
 - `oci-sync push`：将本地文件同步到 OCI 兼容的镜像仓库中。
 - `oci-sync pull`：从 OCI 兼容的镜像仓库中同步文件到本地。
+- `oci-sync delete`：从 OCI 兼容的镜像仓库中删除文件(镜像)。
 
 
 ### 认证
@@ -36,3 +37,11 @@ oci-sync pull <remote_path> <local_path> --passphrase <passphrase>
 - remote_path 格式为 `<registry>/<repository>:<tag>`
 - local_path 可以是文件或目录
 - passphrase 为可选参数，如果提供了 passphrase，则文件会被解密
+
+3. delete
+
+```bash
+oci-sync delete <remote_path>
+```
+
+- remote_path 格式为 `<registry>/<repository>:<tag>`

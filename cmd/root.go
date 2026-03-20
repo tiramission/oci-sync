@@ -32,4 +32,5 @@ func init() {
 
 	rootCmd.AddCommand(newPushCmd())
 	rootCmd.AddCommand(newPullCmd())
+	rootCmd.AddCommand(newDeleteCmd())
 }

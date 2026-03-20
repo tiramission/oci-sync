@@ -57,6 +57,13 @@ oci-sync pull registry.example.com/myrepo:latest ./output
 oci-sync pull registry.example.com/myrepo:encrypted ./output --passphrase mypassword
 ```
 
+### delete — 删除仓库中的文件
+
+```bash
+# 从远程仓库删除推送的文件
+oci-sync delete registry.example.com/myrepo:latest
+```
+
 ### 参数说明
 
 | 参数 | 说明 |

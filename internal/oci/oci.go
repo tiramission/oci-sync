@@ -187,3 +187,24 @@ func newRepository(ctx context.Context, ref string) (*remote.Repository, error) 
 func emptyConfigBytes() []byte {
 	return []byte("{}")
 }
+
+// Delete removes an OCI artifact from the remote registry.
+func Delete(ctx context.Context, ref string) error {
+	repo, err := newRepository(ctx, ref)
+	if err != nil {
+		return err
+	}
+
+	// Resolve the reference to a descriptor (this gets the digest)
+	desc, err := repo.Resolve(ctx, repo.Reference.Reference)
+	if err != nil {
+		return fmt.Errorf("resolve tag/digest: %w", err)
+	}
+
+	// Delete the manifest by descriptor
+	if err := repo.Delete(ctx, desc); err != nil {
+		return fmt.Errorf("delete artifact: %w", err)
+	}
+
+	return nil
+}
