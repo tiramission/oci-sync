@@ -12,25 +12,26 @@ import (
 )
 
 func newPushCmd() *cobra.Command {
-	var passphrase string
+	var local, remote, passphrase string
 
 	cmd := &cobra.Command{
-		Use:   "push <local_path> <remote_path>",
+		Use:   "push [flags]",
 		Short: "Push local files or directories to an OCI registry",
 		Long: `Pack local files or directories (tar.gz), optionally encrypt (AES-256-GCM),
 and push to an OCI-compatible image registry.
 
-remote_path format: <registry>/<repository>:<tag>
+remote format: <registry>/<repository>:<tag>
 Example: registry-1.docker.io/myuser/myrepo:latest`,
-		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			localPath := args[0]
-			remotePath := args[1]
-			return runPush(cmd.Context(), localPath, remotePath, passphrase)
+			return runPush(cmd.Context(), local, remote, passphrase)
 		},
 	}
 
+	cmd.Flags().StringVarP(&local, "local", "l", "", "local file or directory path")
+	cmd.Flags().StringVarP(&remote, "remote", "r", "", "remote OCI registry reference (format: <registry>/<repository>:<tag>)")
 	cmd.Flags().StringVar(&passphrase, "passphrase", "", "passphrase for encryption (leave empty for no encryption)")
+	cmd.MarkFlagRequired("local")
+	cmd.MarkFlagRequired("remote")
 	return cmd
 }
 

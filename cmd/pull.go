@@ -13,25 +13,26 @@ import (
 )
 
 func newPullCmd() *cobra.Command {
-	var passphrase string
+	var local, remote, passphrase string
 
 	cmd := &cobra.Command{
-		Use:   "pull <remote_path> <local_path>",
+		Use:   "pull [flags]",
 		Short: "Pull files or directories from an OCI registry to local path",
 		Long: `Pull an artifact from an OCI-compatible image registry, optionally decrypt,
 and unpack to a local directory.
 
-remote_path format: <registry>/<repository>:<tag>
+remote format: <registry>/<repository>:<tag>
 Example: registry-1.docker.io/myuser/myrepo:latest`,
-		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			remotePath := args[0]
-			localPath := args[1]
-			return runPull(cmd.Context(), remotePath, localPath, passphrase)
+			return runPull(cmd.Context(), remote, local, passphrase)
 		},
 	}
 
+	cmd.Flags().StringVarP(&remote, "remote", "r", "", "remote OCI registry reference (format: <registry>/<repository>:<tag>)")
+	cmd.Flags().StringVarP(&local, "local", "l", "", "local destination directory")
 	cmd.Flags().StringVar(&passphrase, "passphrase", "", "passphrase for decryption (required if content is encrypted)")
+	cmd.MarkFlagRequired("remote")
+	cmd.MarkFlagRequired("local")
 	return cmd
 }
 

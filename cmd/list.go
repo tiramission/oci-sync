@@ -12,19 +12,22 @@ import (
 )
 
 func newListCmd() *cobra.Command {
+	var remote string
 	cmd := &cobra.Command{
-		Use:   "list <remote_repo>",
+		Use:   "list",
 		Short: "List oci-sync artifacts in an OCI registry repository",
 		Long: `List all valid artifacts previously pushed by oci-sync in the specified repository.
 
-remote_repo format: <registry>/<repository>
-Example: registry-1.docker.io/myuser/myrepo`,
-		Args: cobra.ExactArgs(1),
+Example:
+  oci-sync list --remote registry-1.docker.io/myuser/myrepo`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			repoPath := args[0]
-			return runList(cmd.Context(), repoPath)
+			return runList(cmd.Context(), remote)
 		},
 	}
+
+	cmd.Flags().StringVarP(&remote, "remote", "r", "", "remote OCI registry reference (format: <registry>/<repository> or <registry>)")
+	cmd.MarkFlagRequired("remote")
+
 	return cmd
 }
 

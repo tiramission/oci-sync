@@ -41,45 +41,54 @@ docker login registry.example.com
 
 ```bash
 # 推送目录（不加密）
-oci-sync push ./mydir registry.example.com/myrepo:latest
+oci-sync push --local ./mydir --remote registry.example.com/myrepo:latest
 
 # 推送文件（加密）
-oci-sync push ./secret.txt registry.example.com/myrepo:encrypted --passphrase mypassword
+oci-sync push --local ./secret.txt --remote registry.example.com/myrepo:encrypted --passphrase mypassword
+
+# 使用简写标志
+oci-sync push -l ./mydir -r registry.example.com/myrepo:latest
 ```
 
 ### pull — 从仓库拉取
 
 ```bash
 # 拉取（不加密）
-oci-sync pull registry.example.com/myrepo:latest ./output
+oci-sync pull --remote registry.example.com/myrepo:latest --local ./output
 
 # 拉取并解密
-oci-sync pull registry.example.com/myrepo:encrypted ./output --passphrase mypassword
+oci-sync pull --remote registry.example.com/myrepo:encrypted --local ./output --passphrase mypassword
+
+# 使用简写标志
+oci-sync pull -r registry.example.com/myrepo:latest -l ./output
 ```
 
 ### delete — 删除仓库中的文件
 
 ```bash
 # 从远程仓库删除推送的文件
-oci-sync delete registry.example.com/myrepo:latest
+oci-sync delete --remote registry.example.com/myrepo:latest
+
+# 使用简写标志
+oci-sync delete -r registry.example.com/myrepo:latest
 ```
 
 ### list — 列出仓库中的文件镜像
 
 ```bash
 # 检索远程仓库中特定路径的文件镜像
-oci-sync list registry.example.com/myrepo
+oci-sync list --remote registry.example.com/myrepo
 
 # 检索整个注册表下的所有由本工具上传的镜像记录
-oci-sync list registry.example.com
+oci-sync list -r registry.example.com
 ```
 
 ### 参数说明
 
 | 参数 | 说明 |
 |------|------|
-| `local_path` | 本地文件或目录路径 |
-| `remote_path` | OCI 仓库引用，格式：`<registry>/<repository>:<tag>` |
+| `--local`, `-l` | 本地文件或目录路径（push）或目标目录（pull）|
+| `--remote`, `-r` | OCI 仓库引用 (push/pull/delete) 或注册表引用 (list) |
 | `--passphrase`| 加密/解密口令（可选） |
 | `--quiet`, `-q` | 开启静默模式，仅输出错误信息 |
 

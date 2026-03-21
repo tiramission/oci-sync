@@ -21,27 +21,31 @@
 1. push
 
 ```bash
-oci-sync push <local_path> <remote_path> --passphrase <passphrase>
+oci-sync push --local <local_path> --remote <remote_path> --passphrase <passphrase>
+# 或使用简写
+oci-sync push -l <local_path> -r <remote_path> --passphrase <passphrase>
 ```
 
-- remote_path 格式为 `<registry>/<repository>:<tag>`
-- local_path 可以是文件或目录
+- remote 格式为 `<registry>/<repository>:<tag>`
+- local 可以是文件或目录
 - passphrase 为可选参数，如果提供了 passphrase，则文件会被加密
 
 2. pull
 
 ```bash
-oci-sync pull <remote_path> <local_path> --passphrase <passphrase>
+oci-sync pull --remote <remote_path> --local <local_path> --passphrase <passphrase>
+# 或使用简写
+oci-sync pull -r <remote_path> -l <local_path> --passphrase <passphrase>
 ```
 
-- remote_path 格式为 `<registry>/<repository>:<tag>`
-- local_path 可以是文件或目录
+- remote 格式为 `<registry>/<repository>:<tag>`
+- local 可以是文件或目录
 - passphrase 为可选参数，如果提供了 passphrase，则文件会被解密
 
 3. delete
 
 ```bash
-oci-sync delete <remote_path>
+oci-sync delete --remote <remote_path>
 ```
 
 - remote_path 格式为 `<registry>/<repository>:<tag>`
@@ -50,9 +54,9 @@ oci-sync delete <remote_path>
 
 ```bash
 # 列出特定仓库的 tags
-oci-sync list <registry>/<repository>
+oci-sync list --remote <registry>/<repository>
 # 列出整个注册表的所有镜像仓库
-oci-sync list <registry>
+oci-sync list --remote <registry>
 ```
 
-- remote_repo 格式为 `<registry>/<repository>` 或单个 `<registry>`
+- remote 格式为 `<registry>/<repository>` 或单个 `<registry>`

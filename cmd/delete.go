@@ -10,19 +10,21 @@ import (
 )
 
 func newDeleteCmd() *cobra.Command {
+	var remote string
 	cmd := &cobra.Command{
-		Use:   "delete <remote_path>",
+		Use:   "delete",
 		Short: "Delete an artifact from an OCI registry",
 		Long: `Delete a previously pushed artifact from an OCI-compatible image registry.
 
-remote_path format: <registry>/<repository>:<tag>
-Example: registry-1.docker.io/myuser/myrepo:latest`,
-		Args: cobra.ExactArgs(1),
+Example:
+  oci-sync delete --remote registry-1.docker.io/myuser/myrepo:latest`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			remotePath := args[0]
-			return runDelete(cmd.Context(), remotePath)
+			return runDelete(cmd.Context(), remote)
 		},
 	}
+
+	cmd.Flags().StringVarP(&remote, "remote", "r", "", "remote OCI registry reference (format: <registry>/<repository>:<tag>)")
+	cmd.MarkFlagRequired("remote")
 
 	return cmd
 }
