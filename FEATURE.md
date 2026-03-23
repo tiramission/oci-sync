@@ -8,6 +8,10 @@
 - `oci-sync push`：将本地文件同步到 OCI 兼容的镜像仓库中。
 - `oci-sync pull`：从 OCI 兼容的镜像仓库中同步文件到本地。
 - `oci-sync delete`：从 OCI 兼容的镜像仓库中删除文件(镜像)。
+- `oci-sync x push`：实验性快捷推送命令，通过环境变量提供 repository，仅用 `--tag` 指定远程标签。
+- `oci-sync x pull`：实验性快捷拉取命令，通过环境变量提供 repository，仅用 `--tag` 指定远程标签。
+- `oci-sync x list`：实验性快捷列举命令，通过环境变量提供 repository，直接列出所有 tags。
+- `oci-sync x delete`：实验性快捷删除命令，通过环境变量提供 repository，仅用 `--tag` 指定删除目标。
 
 
 ### 认证
@@ -60,3 +64,20 @@ oci-sync list --remote <registry>
 ```
 
 - remote 格式为 `<registry>/<repository>` 或单个 `<registry>`
+
+5. experimental commands
+
+```bash
+export OCI_SYNC_EXPERIMENTAL_REPO=<registry>/<repository>
+
+oci-sync x push --local <local_path> --tag <tag> --passphrase <passphrase>
+oci-sync x pull --tag <tag> --local <local_path> --passphrase <passphrase>
+oci-sync x list
+oci-sync x delete --tag <tag>
+```
+
+- `OCI_SYNC_EXPERIMENTAL_REPO` 提供固定 repository，格式为 `<registry>/<repository>`
+- `--tag` 用于补全远程引用，最终组合为 `<registry>/<repository>:<tag>`
+- `--local` 仍然必需；该需求只是简化远程仓库输入，不改变本地文件/目录行为
+- `oci-sync x list` 不需要 `--tag`，直接列出该 repository 下的所有 tags
+- `oci-sync x delete` 使用 `--tag` 组合出完整远程引用，并删除对应 artifact

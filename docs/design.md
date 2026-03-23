@@ -1,6 +1,6 @@
 # oci-sync 设计文档
 
-> 版本：0.1.0 | 更新时间：2026-03-20
+> 版本：0.1.0 | 更新时间：2026-03-23
 
 ## 1. 项目概述
 
@@ -19,8 +19,8 @@
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                         CLI 层                            │
-│ cmd/root.go   cmd/push.go   cmd/pull.go   cmd/delete.go  │
-│ cmd/list.go                                              │
+│ cmd/root.go   cmd/push.go   cmd/pull.go   cmd/x.go       │
+│ cmd/delete.go cmd/list.go                                │
 └──────────────┬───────────────┬──────────────┬────────────┘
                │              │
       ┌────────▼───┐    ┌─────▼────────┐
@@ -48,6 +48,17 @@
 Registry → [oci.Pull] → layer bytes + annotations
          → [crypto.Decrypt]（若加密）→ tar.gz bytes
          → [archive.Unpack] → 本地路径
+```
+
+**数据流（experimental commands）**
+```
+CLI 参数传入（--tag + OCI_SYNC_EXPERIMENTAL_REPO）
+         → 拼装完整 remote ref
+         → 复用标准 [push]/[pull]/[delete] 数据流
+
+CLI 参数传入（OCI_SYNC_EXPERIMENTAL_REPO）
+         → 解析 repository
+         → 复用标准 [list] 数据流
 ```
 
 **数据流（delete）**
@@ -80,6 +91,7 @@ oci-sync/
 │   ├── root.go                    # 根命令 & 全局配置（--quiet / -q）
 │   ├── push.go                    # push 子命令
 │   ├── pull.go                    # pull 子命令
+│   ├── ex.go                      # experimental 子命令组
 │   ├── delete.go                  # delete 子命令
 │   ├── list.go                    # list 子命令
 │   └── utils.go                   # 工具函数（formatBytes）
@@ -222,6 +234,60 @@ oci-sync pull -r <remote_path> -l <local_path> [--passphrase <passphrase>]
 | `--remote`, `-r` | ✓ | 源仓库引用，格式：`<registry>/<repo>:<tag>` |
 | `--local`, `-l` | ✓ | 本地目标目录 |
 | `--passphrase` | 否 | 解密口令（内容加密时必须提供） |
+
+### x push
+
+```bash
+export OCI_SYNC_EXPERIMENTAL_REPO=<registry>/<repository>
+oci-sync x push --local <local_path> --tag <tag> [--passphrase <passphrase>]
+```
+
+| 参数 | 必选 | 说明 |
+|------|------|------|
+| `--local`, `-l` | ✓ | 本地文件或目录路径 |
+| `--tag` | ✓ | 目标标签 |
+| `--passphrase` | 否 | 加密口令，不提供则不加密 |
+
+### x pull
+
+```bash
+export OCI_SYNC_EXPERIMENTAL_REPO=<registry>/<repository>
+oci-sync x pull --tag <tag> --local <local_path> [--passphrase <passphrase>]
+```
+
+| 参数 | 必选 | 说明 |
+|------|------|------|
+| `--tag` | ✓ | 源标签 |
+| `--local`, `-l` | ✓ | 本地目标目录 |
+| `--passphrase` | 否 | 解密口令（内容加密时必须提供） |
+
+### x list
+
+```bash
+export OCI_SYNC_EXPERIMENTAL_REPO=<registry>/<repository>
+oci-sync x list
+```
+
+| 参数 | 必选 | 说明 |
+|------|------|------|
+| 无 | 否 | 直接使用环境变量中的 repository 列出所有 tags |
+
+### x delete
+
+```bash
+export OCI_SYNC_EXPERIMENTAL_REPO=<registry>/<repository>
+oci-sync x delete --tag <tag>
+```
+
+| 参数 | 必选 | 说明 |
+|------|------|------|
+| `--tag` | ✓ | 要删除的目标标签 |
+
+### experimental environment variable
+
+| 变量名 | 必选 | 说明 |
+|------|------|------|
+| `OCI_SYNC_EXPERIMENTAL_REPO` | `x push/pull/list/delete` 时必选 | 远程仓库，格式：`<registry>/<repository>`，不包含 tag |
 
 ### delete
 

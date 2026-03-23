@@ -63,6 +63,36 @@ oci-sync pull --remote registry.example.com/myrepo:encrypted --local ./output --
 oci-sync pull -r registry.example.com/myrepo:latest -l ./output
 ```
 
+### x push / x pull / x list / x delete — 实验性快捷命令
+
+先设置实验性仓库环境变量：
+
+```bash
+export OCI_SYNC_EXPERIMENTAL_REPO=registry.example.com/myteam/files
+```
+
+然后只通过 `--tag` 指定远程标签：
+
+```bash
+# 推送目录
+oci-sync x push --local ./mydir --tag latest
+
+# 推送文件并加密
+oci-sync x push --local ./secret.txt --tag encrypted --passphrase mypassword
+
+# 拉取到本地目录
+oci-sync x pull --tag latest --local ./output
+
+# 拉取并解密
+oci-sync x pull --tag encrypted --local ./output --passphrase mypassword
+
+# 列出实验性仓库下的所有 tags
+oci-sync x list
+
+# 删除实验性仓库中的指定 tag
+oci-sync x delete --tag old-release
+```
+
 ### delete — 删除仓库中的文件
 
 ```bash
@@ -89,8 +119,15 @@ oci-sync list -r registry.example.com
 |------|------|
 | `--local`, `-l` | 本地文件或目录路径（push）或目标目录（pull）|
 | `--remote`, `-r` | OCI 仓库引用 (push/pull/delete) 或注册表引用 (list) |
+| `--tag` | 实验性 `x push` / `x pull` / `x delete` 使用的标签 |
 | `--passphrase`| 加密/解密口令（可选） |
 | `--quiet`, `-q` | 开启静默模式，仅输出错误信息 |
+
+环境变量：
+
+| 变量名 | 说明 |
+|------|------|
+| `OCI_SYNC_EXPERIMENTAL_REPO` | `oci-sync x push/pull/list/delete` 使用的仓库，格式为 `<registry>/<repository>`，不包含 tag |
 
 ## 工作原理
 
