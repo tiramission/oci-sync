@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/charmbracelet/log"
+	"charm.land/log/v2"
 	"github.com/spf13/cobra"
 	"github.com/tiramission/oci-sync/internal/archive"
 	"github.com/tiramission/oci-sync/internal/crypto"

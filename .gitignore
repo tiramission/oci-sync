@@ -1,5 +1,8 @@
 oci-sync
 temps/
+!temps/
+temps/*
+!temps/run-basic-check.sh
 *.test
 *.out
 .DS_Store

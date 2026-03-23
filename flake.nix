@@ -18,7 +18,7 @@
           src = ./.;
 
           # Run `nix run nixpkgs#go -- mod vendor` if you prefer vendorHash = null
-          vendorHash = "sha256-R4mwvb2nGNrP3o32QYtLEKdSG9b9gD80UHkHaJA0/2E=";
+          vendorHash = "sha256-hN0Atjp1H9l0pPsiPCnLUWx9fSS7/0iWmfU/9rpYDEY=";
 
           # Avoid running network-dependent tests during packaging
           # doCheck = false;
