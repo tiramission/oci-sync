@@ -1,10 +1,15 @@
+# Built binaries
 oci-sync
-temps/
-!temps/
-temps/*
-!temps/run-basic-check.sh
 *.test
 *.out
+
+# Runtime test artifacts
+temps/*
+!temps/run-basic-check.sh
+
+# Nix build output
+result
+
+# OS junk
 .DS_Store
 Thumbs.db
-result
