@@ -27,6 +27,38 @@ nix run github:tiramission/oci-sync -- --help
 nix develop github:tiramission/oci-sync
 ```
 
+### 使用 Home Manager
+在 `flake.nix` 中引用 home-manager 模块：
+
+```nix
+{
+  inputs.home-manager.url = "github:nix-community/home-manager";
+  inputs.oci-sync.url = "github:tiramission/oci-sync";
+
+  outputs = { self, nixpkgs, home-manager, oci-sync }: {
+    homeConfigurations.myuser = home-manager.lib.homeManagerConfiguration {
+      modules = [
+        home-manager.nixosModules.home-manager
+        {
+          home.username = "myuser";
+          home.homeDirectory = "/home/myuser";
+          programs.oci-sync = {
+            enable = true;
+            settings = {
+              experimental = {
+                enabled = true;
+                repo = "registry.example.com/myteam/files";
+              };
+            };
+          };
+        }
+        oci-sync.homeManagerModules.oci-sync
+      ];
+    };
+  };
+}
+```
+
 ## 前置条件
 
 已通过 `docker login` 登录目标仓库：

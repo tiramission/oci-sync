@@ -6,24 +6,29 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
+  outputs = {
+    self,
+    nixpkgs,
+    flake-utils,
+  }:
+    {
+      homeModules = {
+        oci-sync = ./nix;
+        default = self.homeModules.oci-sync;
+      };
+    }
+    // flake-utils.lib.eachDefaultSystem (
+      system: let
         pkgs = nixpkgs.legacyPackages.${system};
-      in
-      {
+      in {
         packages.default = pkgs.buildGoModule {
           pname = "oci-sync";
           version = "0.1.0";
           src = ./.;
 
-          # Run `nix run nixpkgs#go -- mod vendor` if you prefer vendorHash = null
-          vendorHash = "sha256-hN0Atjp1H9l0pPsiPCnLUWx9fSS7/0iWmfU/9rpYDEY=";
+          vendorHash = "sha256-zBWOEbsRqPKGmDlvtYenXcfzk6KpVpj2X1Y9nh8/nFE=";
 
-          # Avoid running network-dependent tests during packaging
-          # doCheck = false;
-
-          nativeBuildInputs = [ pkgs.installShellFiles ];
+          nativeBuildInputs = [pkgs.installShellFiles];
 
           postInstall = ''
             installShellCompletion --cmd oci-sync \
@@ -36,13 +41,17 @@
             description = "Sync local files to OCI-compatible image registries";
             homepage = "https://github.com/tiramission/oci-sync";
             license = licenses.mit;
-            maintainers = [ ];
+            maintainers = [];
             mainProgram = "oci-sync";
           };
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [ go gopls go-tools ];
+          buildInputs = with pkgs; [
+            go
+            gopls
+            go-tools
+          ];
         };
       }
     );

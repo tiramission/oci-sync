@@ -100,3 +100,32 @@ experimental:
 ```
 
 配置优先级：**环境变量 > 配置文件**
+
+## Nix 集成
+
+### Home Manager 模块
+
+本项目提供 home-manager 模块，支持通过 Nix 配置管理 oci-sync：
+
+```nix
+{
+  programs.oci-sync = {
+    enable = true;
+    settings = {
+      experimental = {
+        enable = true;
+        repo = "registry.example.com/myteam/files";
+      };
+    };
+  };
+}
+```
+
+可用选项：
+
+| 选项 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `enable` | bool | false | 启用 oci-sync |
+| `package` | package | - | 自定义包版本 |
+| `settings.experimental.enable` | bool | true | 启用实验性命令 |
+| `settings.experimental.repo` | string | "" | 实验性命令默认仓库 |
