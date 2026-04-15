@@ -6,6 +6,8 @@ import (
 
 	"charm.land/log/v2"
 	"github.com/spf13/cobra"
+
+	"github.com/tiramission/oci-sync/internal/config"
 )
 
 var quiet bool
@@ -37,11 +39,18 @@ func Execute() {
 }
 
 func init() {
+	// Initialize configuration
+	config.InitConfig()
+
 	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Omit informational output")
 
 	rootCmd.AddCommand(newPushCmd())
 	rootCmd.AddCommand(newPullCmd())
-	rootCmd.AddCommand(newExperimentalCmd())
 	rootCmd.AddCommand(newDeleteCmd())
 	rootCmd.AddCommand(newListCmd())
+
+	// Add experimental commands only if enabled
+	if config.ExperimentalEnabled() {
+		rootCmd.AddCommand(newExperimentalCmd())
+	}
 }

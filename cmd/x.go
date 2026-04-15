@@ -3,13 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
-)
 
-const experimentalRepoEnv = "OCI_SYNC_EXPERIMENTAL_REPO"
+	"github.com/tiramission/oci-sync/internal/config"
+)
 
 func newExperimentalCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -32,8 +31,8 @@ func newExperimentalPushCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "push [flags]",
 		Short: "Push to the experimental repository configured by environment variable",
-		Long: fmt.Sprintf(`Push local files or directories to the repository configured in %s.
-Only --tag is required for the remote side.`, experimentalRepoEnv),
+		Long: `Push local files or directories to the configured repository.
+Only --tag is required for the remote side. (Set OCI_SYNC_EXPERIMENTAL_REPO env var or experimental.repo in config file)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runExperimentalPush(cmd.Context(), local, tag, passphrase)
 		},
@@ -53,8 +52,8 @@ func newExperimentalPullCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "pull [flags]",
 		Short: "Pull from the experimental repository configured by environment variable",
-		Long: fmt.Sprintf(`Pull files or directories from the repository configured in %s.
-Only --tag is required for the remote side.`, experimentalRepoEnv),
+		Long: `Pull files or directories from the configured repository.
+Only --tag is required for the remote side. (Set OCI_SYNC_EXPERIMENTAL_REPO env var or experimental.repo in config file)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runExperimentalPull(cmd.Context(), tag, local, passphrase)
 		},
@@ -72,8 +71,8 @@ func newExperimentalListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List artifacts in the experimental repository configured by environment variable",
-		Long: fmt.Sprintf(`List artifacts in the repository configured in %s.
-This command resolves the repository from the environment variable and lists all tags.`, experimentalRepoEnv),
+		Long: `List artifacts in the configured repository.
+This command resolves the repository from config and lists all tags. (Set OCI_SYNC_EXPERIMENTAL_REPO env var or experimental.repo in config file)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runExperimentalList(cmd.Context())
 		},
@@ -88,8 +87,8 @@ func newExperimentalDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete [flags]",
 		Short: "Delete an artifact in the experimental repository configured by environment variable",
-		Long: fmt.Sprintf(`Delete an artifact in the repository configured in %s.
-Only --tag is required for the remote side.`, experimentalRepoEnv),
+		Long: `Delete an artifact in the configured repository.
+Only --tag is required for the remote side. (Set OCI_SYNC_EXPERIMENTAL_REPO env var or experimental.repo in config file)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runExperimentalDelete(cmd.Context(), tag)
 		},
@@ -115,21 +114,7 @@ func buildExperimentalRemoteRef(tag string) (string, error) {
 }
 
 func experimentalRepo() (string, error) {
-	repo := strings.TrimSpace(os.Getenv(experimentalRepoEnv))
-	if repo == "" {
-		return "", fmt.Errorf("environment variable %s is required", experimentalRepoEnv)
-	}
-	if strings.Contains(repo, "@") {
-		return "", fmt.Errorf("environment variable %s must contain a repository, not a digest reference", experimentalRepoEnv)
-	}
-
-	lastColon := strings.LastIndex(repo, ":")
-	lastSlash := strings.LastIndex(repo, "/")
-	if lastColon > lastSlash {
-		return "", fmt.Errorf("environment variable %s must not include a tag", experimentalRepoEnv)
-	}
-
-	return repo, nil
+	return config.ExperimentalRepo()
 }
 
 func runExperimentalPush(ctx context.Context, localPath, tag, passphrase string) error {

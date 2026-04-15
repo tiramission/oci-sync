@@ -81,3 +81,22 @@ oci-sync x delete --tag <tag>
 - `--local` 仍然必需；该需求只是简化远程仓库输入，不改变本地文件/目录行为
 - `oci-sync x list` 不需要 `--tag`，直接列出该 repository 下的所有 tags
 - `oci-sync x delete` 使用 `--tag` 组合出完整远程引用，并删除对应 artifact
+
+### 配置文件
+
+除了环境变量外，也可以使用配置文件来设置仓库地址和实验性命令开关。配置文件使用 YAML 格式，搜索路径如下：
+
+1. 当前工作目录 `./oci-sync.yaml`
+2. 用户配置目录 `~/.config/oci-sync/oci-sync.yaml`
+
+配置文件格式：
+
+```yaml
+experimental:
+  # 启用/禁用实验性命令（默认: true）
+  enabled: true
+  # 实验性命令使用的仓库地址
+  repo: registry.example.com/myteam/files
+```
+
+配置优先级：**环境变量 > 配置文件**

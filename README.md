@@ -129,6 +129,32 @@ oci-sync list -r registry.example.com
 |------|------|
 | `OCI_SYNC_EXPERIMENTAL_REPO` | `oci-sync x push/pull/list/delete` 使用的仓库，格式为 `<registry>/<repository>`，不包含 tag |
 
+### 配置文件
+
+除了环境变量外，也可以使用配置文件来设置仓库地址。配置文件使用 YAML 格式，搜索路径如下：
+
+1. 当前工作目录 `./oci-sync.yaml`
+2. 用户配置目录 `~/.config/oci-sync/oci-sync.yaml`
+
+配置文件格式：
+
+```yaml
+experimental:
+  # 启用/禁用实验性命令（默认: true）
+  enabled: true
+  # 实验性命令使用的仓库地址
+  repo: registry.example.com/myteam/files
+```
+
+配置优先级：**环境变量 > 配置文件**
+
+可用配置项：
+
+| 配置项 | 对应环境变量 | 默认值 | 说明 |
+|--------|-------------|--------|------|
+| `experimental.enabled` | `OCI_SYNC_EXPERIMENTAL_ENABLED` | `true` | 是否启用实验性命令 |
+| `experimental.repo` | `OCI_SYNC_EXPERIMENTAL_REPO` | - | 实验性命令使用的仓库地址 |
+
 ## 工作原理
 
 **push**：本地文件/目录 → tar.gz 打包 → [可选] AES-256-GCM 加密 → 推送至 OCI 仓库
