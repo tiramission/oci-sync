@@ -26,7 +26,7 @@
           version = "0.1.0";
           src = ./.;
 
-          vendorHash = "sha256-zBWOEbsRqPKGmDlvtYenXcfzk6KpVpj2X1Y9nh8/nFE=";
+          vendorHash = "sha256-h7CDdGZN3koG/dGpQB86zNZOlDhotNoddu3vlu8R76s=";
 
           nativeBuildInputs = [pkgs.installShellFiles];
 

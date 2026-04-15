@@ -3,10 +3,9 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
-	"text/tabwriter"
 
 	"charm.land/log/v2"
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 	"github.com/tiramission/oci-sync/internal/oci"
 )
@@ -43,22 +42,35 @@ func runList(ctx context.Context, repoPath string) error {
 		return nil
 	}
 
-	// Print tab-separated table
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "REPO\tTAG\tENCRYPTED\tVERSION\tDIGEST")
+	fmt.Println()
+	fmt.Printf("  Repository: %s\n\n", repoPath)
+
+	data := pterm.TableData{
+		{"REPO", "TAG", "ENCRYPTED", "VERSION", "DIGEST"},
+	}
+
 	for _, a := range artifacts {
 		encStr := "yes"
 		if !a.Encrypted {
 			encStr = "no"
 		}
-		// truncate digest for display
 		digestShort := a.Digest
-		if len(digestShort) > 15 {
-			digestShort = digestShort[:15] + "..."
+		if len(digestShort) > 18 {
+			digestShort = digestShort[:18] + "..."
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.Repo, a.Tag, encStr, a.Version, digestShort)
+		data = append(data, []string{a.Repo, a.Tag, encStr, a.Version, digestShort})
 	}
-	w.Flush()
+
+	output, _ := pterm.DefaultTable.
+		WithHasHeader(true).
+		WithData(data).
+		WithBoxed(true).
+		WithSeparator(" │ ").
+		Srender()
+	fmt.Print(output)
+
+	pterm.Println()
+	fmt.Printf("  Total: %d artifact(s)\n", len(artifacts))
 
 	return nil
 }
