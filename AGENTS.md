@@ -1,50 +1,88 @@
-# oci-sync AI Coding Guidelines
+# oci-sync AI 编码规范
 
-如果你正在协助开发此项目（如 Cursor、Copilot、Gemini 等 AI 工具），请严格遵守以下规范。
+AI 工具（Cursor、Copilot、OpenCode 等）协助开发此项目时，必须严格遵守以下规范。
 
----
+## 🚫 Git 工作流（关键）
 
-## 依赖管理
+**禁止未授权的提交和推送。**
+- 除非用户明确要求，否则禁止使用 `git commit`、`git push` 或强制操作（`--amend`、`--force`）
+- 提交前必须验证所有检查通过（见下文）
+- 不要猜测；如果不确定，请向用户询问
 
-**极其精简**：不要随意引入第三方包，优先使用流行成熟的库，不要重复造轮子。
+**提交前验证（必须）：**
+```bash
+go test ./...
+go build ./...
+nix build --dry-run  # 或在 NixOS 系统上使用 'nix build'
+```
 
-- CLI 框架：必须使用 `github.com/spf13/cobra`
-- OCI 交互：必须且只能使用 `oras.land/oras-go/v2`
+## 📋 开发命令
 
----
+**构建和测试工作流：**
+```bash
+go test ./...                    # 运行单元测试
+go build ./...                   # 构建所有包
+go build -o temps/oci-sync .     # 构建二进制到 temps 目录
+nix build                        # 构建 Nix 包（需要 Nix）
+nix flake update                 # 更新 flake.lock 依赖
+```
 
-## 代码规范
+**集成测试：**
+- 完整运行时检查：`bash temps/run-basic-check.sh`
+  - 必须：`OCI_SYNC_TEST_REPO` 环境变量（如 `registry.example.com/test/repo`）
+  - 可选：`OCI_SYNC_TEST_TAG_BASE`、`OCI_SYNC_TEST_PASSPHRASE`
+  - 测试标准和 `x`（实验性）命令
+  - 测试构件自动清理，除非设置 `OCI_SYNC_KEEP_WORKDIR=1`
 
-1. **纯英文输出**：即使需求使用中文，所有代码中的 CLI 提示语、`Short`/`Long` 命令描述、`Error` 包裹信息以及日志打印，必须全部使用英文。
+**临时文件和测试数据：**
+- 总是在 `temps/` 目录下创建临时文件和构建产物
+- 禁止在项目根目录创建临时文件
+- `temps/runtime-check/` 子目录由测试脚本自动创建
 
-2. **安全底线**：在处理文件解包（Unpack）时，必须使用 `filepath.Abs` 校验前缀，严防路径穿越漏洞（Path Traversal）。
+## 🔧 代码规范（已在代码库中验证）
 
-3. **日志规范**：统一使用 `charm.land/log/v2` 打印日志，禁止使用标准库的 `log` 或 `fmt.Println`（除非是格式化表格输出）。
+**日志：** 只使用 `charm.land/log/v2`。禁止使用标准库 `log` 或 `fmt.Println`（除非用于表格格式化输出，如 cmd/list.go 中的 JSON/YAML）。
 
----
+**CLI/错误：** 所有命令描述、错误消息和日志必须使用英文（即使需求是中文）。
 
-## 文档规范
+**安全：** 所有文件解包都使用 `filepath.Abs()` 防止路径穿越攻击（见 `internal/archive/archive.go`）。
 
-4. **文档同步**：任何架构或命令行参数的修改，必须主动同步更新到 `docs/design.md` 和 `README.md`。
+**依赖（已锁定）：**
+- CLI 框架：`github.com/spf13/cobra`（必需）
+- OCI 交互：`oras.land/oras-go/v2`（必需且唯一）
+- 日志：`charm.land/log/v2`
+- 加密：`golang.org/x/crypto`（scrypt + AES-256-GCM）
+- 配置：`github.com/spf13/viper`
+- UI：`github.com/pterm/pterm`（表格格式化）
 
----
+禁止添加新依赖，除非有充分理由。
 
-## 测试规范
+## 📚 文档更新
 
-5. **测试规范**：进行二进制测试时，必须在 `temps` 目录下创建临时文件进行测试，永远不要在项目根目录下创建临时文件。
+**架构或 CLI 参数变更** 必须更新：
+- `docs/design.md`（架构、数据流、模块 API）
+- `README.md`（用户端示例和工作流）
 
----
+**功能添加或边界情况** 应尽可能更新 `FEATURE.md`。
 
-## 需求文档
+## 📁 项目结构
 
-6. **需求文档维护**：`FEATURE.md` 原则上是以人类编写输入为主的需求文档，但在实现拓展功能或解决需求边界后，请尽可能主动帮忙补充更新该文档。
+```
+cmd/              # CLI 命令（基于 cobra）
+internal/
+  archive/        # tar.gz 打包/解包
+  crypto/         # AES-256-GCM 加密
+  oci/            # oras-go v2 push/pull/list/delete
+  config/         # Viper 配置 + 环境变量
+nix/              # Nix flake 包和开发 shell
+docs/
+  design.md       # 完整架构和 API 文档
+temps/            # 测试产物和构建输出（git 忽略）
+```
 
----
+## 🎯 关键实现注意事项
 
-## Git 提交规范
-
-7. **禁止擅自提交**：除非用户明确要求，不要使用 `git commit` 或推送代码。
-
-8. **提交前检查**：提交前必须保证 `go test ./...`、`go build ./...` 和 `nix build` 全部通过。
-
-9. **禁止 force 操作**：除非用户明确要求，不要使用 `git commit --amend` 或 `git push --force`。
+- **无 OCI 单元测试**：`internal/oci` 无单元测试（需要实时仓库访问）。仅使用集成测试。
+- **配置发现**：自动加载 `~/.docker/config.json` 用于仓库认证（oras-go 处理）。
+- **实验性命令**（`x push`、`x pull` 等）：使用环境变量 `OCI_SYNC_EXPERIMENTAL_REPO` 或配置文件。
+- **清单注解**：加密状态和版本记录在 OCI 镜像清单中，而非文件元数据。
