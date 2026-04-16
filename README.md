@@ -52,7 +52,7 @@ nix develop github:tiramission/oci-sync
             };
           };
         }
-        oci-sync.homeManagerModules.oci-sync
+        oci-sync.homeModules.oci-sync
       ];
     };
   };
