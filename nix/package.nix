@@ -2,7 +2,7 @@
 
 pkgs.buildGoModule {
   pname = "oci-sync";
-  version = "0.1.0";
+  version = "0.1.0-dev";
   src = ../.;
 
   vendorHash = "sha256-h7CDdGZN3koG/dGpQB86zNZOlDhotNoddu3vlu8R76s=";
