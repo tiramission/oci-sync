@@ -38,6 +38,20 @@ Example: registry-1.docker.io/myuser/myrepo:latest`,
 
 func runPull(ctx context.Context, remotePath, localPath, passphrase string) error {
 	log.Info("Pulling from registry...", "ref", remotePath)
+
+	// Check encryption status before downloading the full content
+	encrypted, err := oci.IsEncrypted(ctx, remotePath)
+	if err != nil {
+		return fmt.Errorf("failed to check encryption status: %w", err)
+	}
+
+	if encrypted && passphrase == "" {
+		return fmt.Errorf("content is encrypted, please provide a decryption key via --passphrase")
+	}
+	if !encrypted && passphrase != "" {
+		log.Warn("content is not encrypted, ignoring --passphrase flag")
+	}
+
 	result, err := oci.Pull(ctx, remotePath)
 	if err != nil {
 		return fmt.Errorf("pull failed: %w", err)
@@ -47,17 +61,12 @@ func runPull(ctx context.Context, remotePath, localPath, passphrase string) erro
 	data := result.Data
 
 	if result.Encrypted {
-		if passphrase == "" {
-			return fmt.Errorf("content is encrypted, please provide a decryption key via --passphrase")
-		}
 		log.Info("Decrypting...")
 		data, err = crypto.Decrypt(data, passphrase)
 		if err != nil {
 			return fmt.Errorf("decryption failed: %w", err)
 		}
 		log.Info("Decryption complete")
-	} else if passphrase != "" {
-		log.Warn("content is not encrypted, ignoring --passphrase flag")
 	}
 
 	// Ensure destination directory exists

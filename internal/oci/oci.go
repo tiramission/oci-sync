@@ -117,6 +117,28 @@ type PullResult struct {
 	Encrypted bool
 }
 
+// IsEncrypted checks if the artifact at the given reference is encrypted.
+// It only fetches the manifest without downloading the full data.
+func IsEncrypted(ctx context.Context, ref string) (bool, error) {
+	repo, err := newRepository(ctx, ref)
+	if err != nil {
+		return false, err
+	}
+
+	// Fetch manifest bytes by tag
+	_, manifestBytes, err := oras.FetchBytes(ctx, repo, repo.Reference.Reference, oras.DefaultFetchBytesOptions)
+	if err != nil {
+		return false, fmt.Errorf("fetch manifest: %w", err)
+	}
+
+	var manifest ociManifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		return false, fmt.Errorf("unmarshal manifest: %w", err)
+	}
+
+	return manifest.Annotations[AnnotationEncrypted] == "true", nil
+}
+
 // Pull fetches an OCI artifact from the given reference.
 func Pull(ctx context.Context, ref string) (*PullResult, error) {
 	repo, err := newRepository(ctx, ref)
