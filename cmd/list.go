@@ -73,8 +73,8 @@ func runList(ctx context.Context, repoPath string, format string) error {
 				encStr = "no"
 			}
 			digestShort := a.Digest
-			if len(digestShort) > 18 {
-				digestShort = digestShort[:18] + "..."
+			if len(digestShort) > 32 {
+				digestShort = digestShort[:32] + "..."
 			}
 			data = append(data, []string{a.Repo, a.Tag, encStr, a.Version, digestShort})
 		}
