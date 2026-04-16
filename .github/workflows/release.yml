@@ -11,31 +11,7 @@ permissions:
 jobs:
   build-and-release:
     name: Build and Release
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            suffix: ""
-          - os: ubuntu-latest
-            goos: linux
-            goarch: arm64
-            suffix: ""
-          - os: macos-latest
-            goos: darwin
-            goarch: amd64
-            suffix: ""
-          - os: macos-latest
-            goos: darwin
-            goarch: arm64
-            suffix: ""
-          - os: windows-latest
-            goos: windows
-            goarch: amd64
-            suffix: ".exe"
-
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -46,56 +22,45 @@ jobs:
           go-version-file: 'go.mod'
           cache-dependency-path: go.sum
 
-      - name: Build binary
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+      - name: Build Linux amd64
         run: |
-          go build -o oci-sync${{ matrix.suffix }} .
+          GOOS=linux GOARCH=amd64 go build -o oci-sync-linux-amd64 .
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: oci-sync-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: oci-sync${{ matrix.suffix }}
-          retention-days: 1
+      - name: Build Linux arm64
+        run: |
+          GOOS=linux GOARCH=arm64 go build -o oci-sync-linux-arm64 .
 
-  create-release:
-    name: Create Release
-    needs: build-and-release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - name: Build macOS amd64
+        run: |
+          GOOS=darwin GOARCH=amd64 go build -o oci-sync-darwin-amd64 .
+
+      - name: Build macOS arm64
+        run: |
+          GOOS=darwin GOARCH=arm64 go build -o oci-sync-darwin-arm64 .
+
+      - name: Build Windows amd64
+        run: |
+          GOOS=windows GOARCH=amd64 go build -o oci-sync-windows-amd64.exe .
 
       - name: Determine if prerelease
         id: prerelease
         run: |
-          TAG=${{ github.ref_name }}
+          TAG=${GITHUB_REF##*/}
           if [[ $TAG =~ -alpha|-beta|-rc ]]; then
             echo "is_prerelease=true" >> $GITHUB_OUTPUT
           else
             echo "is_prerelease=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: artifacts
-
-      - name: Organize artifacts
-        run: |
-          mkdir -p release
-          mv artifacts/oci-sync-linux-amd64/oci-sync release/oci-sync-linux-amd64
-          mv artifacts/oci-sync-linux-arm64/oci-sync release/oci-sync-linux-arm64
-          mv artifacts/oci-sync-darwin-amd64/oci-sync release/oci-sync-darwin-amd64
-          mv artifacts/oci-sync-darwin-arm64/oci-sync release/oci-sync-darwin-arm64
-          mv artifacts/oci-sync-windows-amd64/oci-sync.exe release/oci-sync-windows-amd64.exe
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*
+          files: |
+            oci-sync-linux-amd64
+            oci-sync-linux-arm64
+            oci-sync-darwin-amd64
+            oci-sync-darwin-arm64
+            oci-sync-windows-amd64.exe
           draft: false
           prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
           generate_release_notes: true
