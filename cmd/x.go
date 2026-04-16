@@ -68,16 +68,18 @@ Only --tag is required for the remote side. (Set OCI_SYNC_EXPERIMENTAL_REPO env 
 }
 
 func newExperimentalListCmd() *cobra.Command {
+	var format string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List artifacts in the experimental repository configured by environment variable",
 		Long: `List artifacts in the configured repository.
 This command resolves the repository from config and lists all tags. (Set OCI_SYNC_EXPERIMENTAL_REPO env var or experimental.repo in config file)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExperimentalList(cmd.Context())
+			return runExperimentalList(cmd.Context(), format)
 		},
 	}
 
+	cmd.Flags().StringVarP(&format, "format", "f", "table", "output format (table, json, yaml)")
 	return cmd
 }
 
@@ -133,12 +135,12 @@ func runExperimentalPull(ctx context.Context, tag, localPath, passphrase string)
 	return runPull(ctx, remotePath, localPath, passphrase)
 }
 
-func runExperimentalList(ctx context.Context) error {
+func runExperimentalList(ctx context.Context, format string) error {
 	repo, err := experimentalRepo()
 	if err != nil {
 		return err
 	}
-	return runList(ctx, repo)
+	return runList(ctx, repo, format)
 }
 
 func runExperimentalDelete(ctx context.Context, tag string) error {

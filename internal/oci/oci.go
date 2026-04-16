@@ -35,10 +35,10 @@ const (
 // ociManifest mirrors ocispec.Manifest but uses specs.Versioned to set schemaVersion correctly.
 type ociManifest struct {
 	specs.Versioned
-	MediaType   string                `json:"mediaType"`
-	Config      ocispec.Descriptor    `json:"config"`
-	Layers      []ocispec.Descriptor  `json:"layers"`
-	Annotations map[string]string     `json:"annotations,omitempty"`
+	MediaType   string               `json:"mediaType"`
+	Config      ocispec.Descriptor   `json:"config"`
+	Layers      []ocispec.Descriptor `json:"layers"`
+	Annotations map[string]string    `json:"annotations,omitempty"`
 }
 
 // Push pushes data as an OCI artifact to the given reference.
@@ -212,22 +212,24 @@ func Delete(ctx context.Context, ref string) error {
 
 // ArtifactInfo represents metadata of an artifact pushed by oci-sync.
 type ArtifactInfo struct {
-	Repo      string
-	Tag       string
-	Digest    string
-	Encrypted bool
-	Version   string
+	FullName  string `json:"fullName" yaml:"fullName"`
+	Repo      string `json:"repo" yaml:"repo"`
+	Tag       string `json:"tag" yaml:"tag"`
+	Digest    string `json:"digest" yaml:"digest"`
+	Encrypted bool   `json:"encrypted" yaml:"encrypted"`
+	Version   string `json:"version" yaml:"version"`
 }
 
 // List retrieves all oci-sync artifacts in the specified repository or registry.
 func List(ctx context.Context, ref string) ([]ArtifactInfo, error) {
 	// 1. Try treating as a repository first (contains '/')
 	if strings.Contains(ref, "/") {
-		repo, err := newRepository(ctx, ref)
+		registry, _ := splitRegistry(ref)
+		repoObj, err := newRepository(ctx, ref)
 		if err != nil {
 			return nil, err
 		}
-		return listRepoTags(ctx, repo)
+		return listRepoTags(ctx, registry, repoObj)
 	}
 
 	// 2. Treat as a registry host
@@ -239,13 +241,12 @@ func List(ctx context.Context, ref string) ([]ArtifactInfo, error) {
 	var results []ArtifactInfo
 	err = reg.Repositories(ctx, "", func(repos []string) error {
 		for _, repoName := range repos {
-			// Construct full repo path
 			fullRepoRef := ref + "/" + repoName
-			repo, err := newRepository(ctx, fullRepoRef)
+			repoObj, err := newRepository(ctx, fullRepoRef)
 			if err != nil {
 				continue
 			}
-			infos, err := listRepoTags(ctx, repo)
+			infos, err := listRepoTags(ctx, ref, repoObj)
 			if err == nil {
 				results = append(results, infos...)
 			}
@@ -261,7 +262,7 @@ func List(ctx context.Context, ref string) ([]ArtifactInfo, error) {
 }
 
 // listRepoTags is a helper to list all tags in a given repository.
-func listRepoTags(ctx context.Context, repo *remote.Repository) ([]ArtifactInfo, error) {
+func listRepoTags(ctx context.Context, registry string, repo *remote.Repository) ([]ArtifactInfo, error) {
 	var results []ArtifactInfo
 	repoName := repo.Reference.Repository
 
@@ -290,6 +291,7 @@ func listRepoTags(ctx context.Context, repo *remote.Repository) ([]ArtifactInfo,
 			if val, ok := manifest.Annotations[AnnotationVersion]; ok {
 				encStr := manifest.Annotations[AnnotationEncrypted]
 				results = append(results, ArtifactInfo{
+					FullName:  registry + "/" + repoName + ":" + tag,
 					Repo:      repoName,
 					Tag:       tag,
 					Digest:    desc.Digest.String(),
@@ -301,6 +303,15 @@ func listRepoTags(ctx context.Context, repo *remote.Repository) ([]ArtifactInfo,
 		return nil
 	})
 	return results, err
+}
+
+// splitRegistry splits a reference into registry and repository parts.
+func splitRegistry(ref string) (registry, repo string) {
+	parts := strings.SplitN(ref, "/", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return ref, ""
 }
 
 func newRegistry(ctx context.Context, host string) (*remote.Registry, error) {
@@ -324,4 +335,3 @@ func newRegistry(ctx context.Context, host string) (*remote.Registry, error) {
 
 	return reg, nil
 }
-

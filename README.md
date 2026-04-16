@@ -121,6 +121,9 @@ oci-sync x pull --tag encrypted --local ./output --passphrase mypassword
 # 列出实验性仓库下的所有 tags
 oci-sync x list
 
+# 以 JSON 格式输出
+oci-sync x list --format json
+
 # 删除实验性仓库中的指定 tag
 oci-sync x delete --tag old-release
 ```
@@ -143,6 +146,12 @@ oci-sync list --remote registry.example.com/myrepo
 
 # 检索整个注册表下的所有由本工具上传的镜像记录
 oci-sync list -r registry.example.com
+
+# 以 JSON 格式输出
+oci-sync list -r registry.example.com/myrepo --format json
+
+# 以 YAML 格式输出
+oci-sync list -r registry.example.com/myrepo -f yaml
 ```
 
 ### 参数说明
@@ -153,6 +162,7 @@ oci-sync list -r registry.example.com
 | `--remote`, `-r` | OCI 仓库引用 (push/pull/delete) 或注册表引用 (list) |
 | `--tag` | 实验性 `x push` / `x pull` / `x delete` 使用的标签 |
 | `--passphrase`| 加密/解密口令（可选） |
+| `--format`, `-f` | 输出格式：`table`（默认）、`json`、`yaml` |
 | `--quiet`, `-q` | 开启静默模式，仅输出错误信息 |
 
 环境变量：
