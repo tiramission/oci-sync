@@ -113,7 +113,7 @@ experimental:
     enable = true;
     settings = {
       experimental = {
-        enable = true;
+        enabled = true;
         repo = "registry.example.com/myteam/files";
       };
     };
@@ -127,5 +127,5 @@ experimental:
 |------|------|--------|------|
 | `enable` | bool | false | 启用 oci-sync |
 | `package` | package | - | 自定义包版本 |
-| `settings.experimental.enable` | bool | true | 启用实验性命令 |
+| `settings.experimental.enabled` | bool | true | 启用实验性命令 |
 | `settings.experimental.repo` | string | "" | 实验性命令默认仓库 |
