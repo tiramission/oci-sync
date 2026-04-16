@@ -13,7 +13,7 @@
   }:
     {
       homeModules = {
-        oci-sync = ./nix;
+        oci-sync = ./nix/home-module.nix;
         default = self.homeModules.oci-sync;
       };
     }
