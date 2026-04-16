@@ -43,6 +43,8 @@
 
 ## Git 提交规范
 
-7. **提交前检查**：提交前必须保证 `go test ./...`、`go build ./...` 和 `nix build` 全部通过。
+7. **禁止擅自提交**：除非用户明确要求，不要使用 `git commit` 或推送代码。
 
-8. **禁止擅自操作**：除非用户明确要求，不要使用 `git commit --amend` 或 `git push --force`，也不要在未确认的情况下推送代码。
+8. **提交前检查**：提交前必须保证 `go test ./...`、`go build ./...` 和 `nix build` 全部通过。
+
+9. **禁止 force 操作**：除非用户明确要求，不要使用 `git commit --amend` 或 `git push --force`。
