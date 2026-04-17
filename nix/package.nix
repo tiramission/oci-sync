@@ -20,7 +20,7 @@ pkgs.buildGoModule {
     description = "Sync local files to OCI-compatible image registries";
     homepage = "https://github.com/tiramission/oci-sync";
     license = pkgs.lib.licenses.mit;
-    maintainers = [];
+    maintainers = with pkgs.lib.maintainers; [tiramission];
     mainProgram = "oci-sync";
     platforms = pkgs.lib.platforms.all;
   };

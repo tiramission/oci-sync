@@ -39,6 +39,24 @@ in {
             default = {};
             description = "Experimental settings";
           };
+          auths = lib.mkOption {
+            type = lib.types.attrsOf (lib.types.submodule {
+              options = {
+                username = lib.mkOption {
+                  type = lib.types.str;
+                  default = "";
+                  description = "Registry authentication username";
+                };
+                password = lib.mkOption {
+                  type = lib.types.str;
+                  default = "";
+                  description = "Registry authentication password or token";
+                };
+              };
+            });
+            default = {};
+            description = "Per-registry authentication credentials";
+          };
         };
       };
       default = {};
