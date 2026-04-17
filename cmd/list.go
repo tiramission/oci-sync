@@ -64,7 +64,7 @@ func runList(ctx context.Context, repoPath string, format string) error {
 		fmt.Printf("  Repository: %s\n\n", repoPath)
 
 		data := pterm.TableData{
-			{"REPO", "TAG", "ENCRYPTED", "VERSION", "DIGEST"},
+			{"REPO", "TAG", "ENCRYPTED", "VERSION", "SIZE", "DIGEST"},
 		}
 
 		for _, a := range artifacts {
@@ -76,7 +76,7 @@ func runList(ctx context.Context, repoPath string, format string) error {
 			if len(digestShort) > 32 {
 				digestShort = digestShort[:32] + "..."
 			}
-			data = append(data, []string{a.Repo, a.Tag, encStr, a.Version, digestShort})
+			data = append(data, []string{a.Repo, a.Tag, encStr, a.Version, formatBytes(int(a.Size)), digestShort})
 		}
 
 		output, _ := pterm.DefaultTable.

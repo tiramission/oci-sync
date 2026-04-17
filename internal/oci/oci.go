@@ -222,6 +222,7 @@ type ArtifactInfo struct {
 	Digest    string `json:"digest" yaml:"digest"`
 	Encrypted bool   `json:"encrypted" yaml:"encrypted"`
 	Version   string `json:"version" yaml:"version"`
+	Size      int64  `json:"size" yaml:"size"`
 }
 
 func List(ctx context.Context, ref string) ([]ArtifactInfo, error) {
@@ -290,6 +291,10 @@ func listRepoTags(ctx context.Context, registry string, repo *remote.Repository)
 
 			if val, ok := manifest.Annotations[AnnotationVersion]; ok {
 				encStr := manifest.Annotations[AnnotationEncrypted]
+				var size int64
+				if len(manifest.Layers) > 0 {
+					size = manifest.Layers[0].Size
+				}
 				results = append(results, ArtifactInfo{
 					FullName:  registry + "/" + repoName + ":" + tag,
 					Repo:      repoName,
@@ -297,6 +302,7 @@ func listRepoTags(ctx context.Context, registry string, repo *remote.Repository)
 					Digest:    desc.Digest.String(),
 					Encrypted: encStr == "true",
 					Version:   val,
+					Size:      size,
 				})
 			}
 		}
