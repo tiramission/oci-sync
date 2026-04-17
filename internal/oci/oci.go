@@ -14,6 +14,7 @@ import (
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/tiramission/oci-sync/internal/config"
+	"github.com/tiramission/oci-sync/internal/version"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
@@ -24,7 +25,6 @@ import (
 const (
 	AnnotationEncrypted = "io.oci-sync.encrypted"
 	AnnotationVersion   = "io.oci-sync.version"
-	Version             = "0.1.0"
 	mediaTypeLayer      = "application/octet-stream"
 )
 
@@ -49,7 +49,7 @@ func Push(ctx context.Context, data []byte, ref string, encrypted bool) error {
 	}
 
 	annotations := map[string]string{
-		AnnotationVersion: Version,
+		AnnotationVersion: version.Version,
 	}
 	if encrypted {
 		annotations[AnnotationEncrypted] = "true"

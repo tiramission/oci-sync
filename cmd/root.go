@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tiramission/oci-sync/internal/config"
+	"github.com/tiramission/oci-sync/internal/version"
 )
 
 var quiet bool
@@ -18,7 +19,7 @@ var rootCmd = &cobra.Command{
 	Long: `oci-sync packs, compresses, and optionally encrypts local files or directories,
 and pushes them as OCI artifacts to OCI-compatible image registries.
 Authentication uses Docker credential store (compatible with docker login).`,
-	Version: "0.1.0",
+	Version: version.Version,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Configure logger based on flags
 		if quiet {

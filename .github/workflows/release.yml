@@ -20,27 +20,26 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: 'go.mod'
-          cache-dependency-path: go.sum
+          cache-dependection-path: go.sum
 
-      - name: Build Linux amd64
+      - name: Determine version
+        id: version
         run: |
-          GOOS=linux GOARCH=amd64 go build -o oci-sync-linux-amd64 .
+          TAG=${GITHUB_REF##*/}
+          VERSION=${TAG#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Build Linux arm64
+      - name: Build binaries
         run: |
-          GOOS=linux GOARCH=arm64 go build -o oci-sync-linux-arm64 .
-
-      - name: Build macOS amd64
-        run: |
-          GOOS=darwin GOARCH=amd64 go build -o oci-sync-darwin-amd64 .
-
-      - name: Build macOS arm64
-        run: |
-          GOOS=darwin GOARCH=arm64 go build -o oci-sync-darwin-arm64 .
-
-      - name: Build Windows amd64
-        run: |
-          GOOS=windows GOARCH=amd64 go build -o oci-sync-windows-amd64.exe .
+          TAG=${{ steps.version.outputs.version }}
+          for OS in linux darwin windows; do
+            for ARCH in amd64 arm64; do
+              EXT=""
+              if [ "$OS" = "windows" ]; then EXT=".exe"; fi
+              OUTPUT="oci-sync-${OS}-${ARCH}${EXT}"
+              GOOS=$OS GOARCH=$ARCH go build -ldflags "-X github.com/tiramission/oci-sync/internal/version.Version=${TAG}" -o "$OUTPUT" .
+            done
+          done
 
       - name: Determine if prerelease
         id: prerelease
