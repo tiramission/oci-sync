@@ -1,5 +1,5 @@
 // Package oci provides push and pull operations for OCI artifacts using oras-go v2.
-// Authentication is handled automatically via Docker credential store (~/.docker/config.json).
+// Authentication supports config file (per-registry) and Docker credential store fallback.
 package oci
 
 import (
@@ -13,6 +13,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/tiramission/oci-sync/internal/config"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
@@ -21,18 +22,12 @@ import (
 )
 
 const (
-	// AnnotationEncrypted marks whether the content is encrypted.
 	AnnotationEncrypted = "io.oci-sync.encrypted"
-	// AnnotationVersion records the tool version used to push.
-	AnnotationVersion = "io.oci-sync.version"
-	// Version is the current tool version.
-	Version = "0.1.0"
-
-	// mediaTypeLayer is used for arbitrary binary data layers.
-	mediaTypeLayer = "application/octet-stream"
+	AnnotationVersion   = "io.oci-sync.version"
+	Version             = "0.1.0"
+	mediaTypeLayer      = "application/octet-stream"
 )
 
-// ociManifest mirrors ocispec.Manifest but uses specs.Versioned to set schemaVersion correctly.
 type ociManifest struct {
 	specs.Versioned
 	MediaType   string               `json:"mediaType"`
@@ -41,23 +36,18 @@ type ociManifest struct {
 	Annotations map[string]string    `json:"annotations,omitempty"`
 }
 
-// Push pushes data as an OCI artifact to the given reference.
-// ref must be in the format <registry>/<repository>:<tag>.
-// encrypted indicates whether data has been encrypted.
 func Push(ctx context.Context, data []byte, ref string, encrypted bool) error {
 	repo, err := newRepository(ctx, ref)
 	if err != nil {
 		return err
 	}
 
-	// Create the layer descriptor
 	layerDesc := ocispec.Descriptor{
 		MediaType: mediaTypeLayer,
 		Digest:    digest.FromBytes(data),
 		Size:      int64(len(data)),
 	}
 
-	// Build manifest annotations
 	annotations := map[string]string{
 		AnnotationVersion: Version,
 	}
@@ -67,7 +57,6 @@ func Push(ctx context.Context, data []byte, ref string, encrypted bool) error {
 		annotations[AnnotationEncrypted] = "false"
 	}
 
-	// Build empty config
 	configBytes := emptyConfigBytes()
 	configDesc := ocispec.Descriptor{
 		MediaType: ocispec.MediaTypeImageConfig,
@@ -75,7 +64,6 @@ func Push(ctx context.Context, data []byte, ref string, encrypted bool) error {
 		Size:      int64(len(configBytes)),
 	}
 
-	// Build OCI manifest
 	manifest := ociManifest{
 		Versioned:   specs.Versioned{SchemaVersion: 2},
 		MediaType:   ocispec.MediaTypeImageManifest,
@@ -88,17 +76,14 @@ func Push(ctx context.Context, data []byte, ref string, encrypted bool) error {
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
 
-	// Push layer
 	if err := repo.Push(ctx, layerDesc, bytes.NewReader(data)); err != nil {
 		return fmt.Errorf("push layer: %w", err)
 	}
 
-	// Push config (empty)
 	if err := repo.Push(ctx, configDesc, bytes.NewReader(configBytes)); err != nil {
 		return fmt.Errorf("push config: %w", err)
 	}
 
-	// Push manifest with tag
 	manifestDesc := ocispec.Descriptor{
 		MediaType: ocispec.MediaTypeImageManifest,
 		Digest:    digest.FromBytes(manifestBytes),
@@ -111,21 +96,17 @@ func Push(ctx context.Context, data []byte, ref string, encrypted bool) error {
 	return nil
 }
 
-// PullResult contains the pulled data and its metadata.
 type PullResult struct {
 	Data      []byte
 	Encrypted bool
 }
 
-// IsEncrypted checks if the artifact at the given reference is encrypted.
-// It only fetches the manifest without downloading the full data.
 func IsEncrypted(ctx context.Context, ref string) (bool, error) {
 	repo, err := newRepository(ctx, ref)
 	if err != nil {
 		return false, err
 	}
 
-	// Fetch manifest bytes by tag
 	_, manifestBytes, err := oras.FetchBytes(ctx, repo, repo.Reference.Reference, oras.DefaultFetchBytesOptions)
 	if err != nil {
 		return false, fmt.Errorf("fetch manifest: %w", err)
@@ -139,14 +120,12 @@ func IsEncrypted(ctx context.Context, ref string) (bool, error) {
 	return manifest.Annotations[AnnotationEncrypted] == "true", nil
 }
 
-// Pull fetches an OCI artifact from the given reference.
 func Pull(ctx context.Context, ref string) (*PullResult, error) {
 	repo, err := newRepository(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
 
-	// Fetch manifest bytes by tag
 	_, manifestBytes, err := oras.FetchBytes(ctx, repo, repo.Reference.Reference, oras.DefaultFetchBytesOptions)
 	if err != nil {
 		return nil, fmt.Errorf("fetch manifest: %w", err)
@@ -161,7 +140,6 @@ func Pull(ctx context.Context, ref string) (*PullResult, error) {
 		return nil, fmt.Errorf("manifest has no layers")
 	}
 
-	// Fetch the first (and only) layer by digest
 	layerDesc := manifest.Layers[0]
 	rc, err := repo.Blobs().Fetch(ctx, layerDesc)
 	if err != nil {
@@ -181,50 +159,55 @@ func Pull(ctx context.Context, ref string) (*PullResult, error) {
 	}, nil
 }
 
-// newRepository creates an authenticated remote repository client.
-// Authentication is loaded from ~/.docker/config.json (Docker credential store).
 func newRepository(ctx context.Context, ref string) (*remote.Repository, error) {
 	repo, err := remote.NewRepository(ref)
 	if err != nil {
 		return nil, fmt.Errorf("parse reference %q: %w", ref, err)
 	}
 
-	// Load credentials from Docker config (~/.docker/config.json)
-	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{
-		AllowPlaintextPut: false,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("load docker credential store: %w", err)
+	authClient := &auth.Client{
+		Client: retry.DefaultClient,
+		Cache:  auth.DefaultCache,
 	}
 
-	repo.Client = &auth.Client{
-		Client:     retry.DefaultClient,
-		Cache:      auth.DefaultCache,
-		Credential: credentials.Credential(credStore),
+	host := repo.Reference.Host()
+	if regAuth, ok := config.GetRegistryAuth(host); ok && regAuth.Username != "" && regAuth.Password != "" {
+		authClient.Credential = auth.CredentialFunc(func(ctx context.Context, reg string) (auth.Credential, error) {
+			return auth.Credential{
+				Username: regAuth.Username,
+				Password: regAuth.Password,
+			}, nil
+		})
+	} else {
+		credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{
+			AllowPlaintextPut: false,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("load docker credential store: %w", err)
+		}
+		authClient.Credential = credentials.Credential(credStore)
 	}
+
+	repo.Client = authClient
 
 	return repo, nil
 }
 
-// emptyConfigBytes returns the bytes for an empty OCI config.
 func emptyConfigBytes() []byte {
 	return []byte("{}")
 }
 
-// Delete removes an OCI artifact from the remote registry.
 func Delete(ctx context.Context, ref string) error {
 	repo, err := newRepository(ctx, ref)
 	if err != nil {
 		return err
 	}
 
-	// Resolve the reference to a descriptor (this gets the digest)
 	desc, err := repo.Resolve(ctx, repo.Reference.Reference)
 	if err != nil {
 		return fmt.Errorf("resolve tag/digest: %w", err)
 	}
 
-	// Delete the manifest by descriptor
 	if err := repo.Delete(ctx, desc); err != nil {
 		return fmt.Errorf("delete artifact: %w", err)
 	}
@@ -232,7 +215,6 @@ func Delete(ctx context.Context, ref string) error {
 	return nil
 }
 
-// ArtifactInfo represents metadata of an artifact pushed by oci-sync.
 type ArtifactInfo struct {
 	FullName  string `json:"fullName" yaml:"fullName"`
 	Repo      string `json:"repo" yaml:"repo"`
@@ -242,9 +224,7 @@ type ArtifactInfo struct {
 	Version   string `json:"version" yaml:"version"`
 }
 
-// List retrieves all oci-sync artifacts in the specified repository or registry.
 func List(ctx context.Context, ref string) ([]ArtifactInfo, error) {
-	// 1. Try treating as a repository first (contains '/')
 	if strings.Contains(ref, "/") {
 		registry, _ := splitRegistry(ref)
 		repoObj, err := newRepository(ctx, ref)
@@ -254,7 +234,6 @@ func List(ctx context.Context, ref string) ([]ArtifactInfo, error) {
 		return listRepoTags(ctx, registry, repoObj)
 	}
 
-	// 2. Treat as a registry host
 	reg, err := newRegistry(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -283,7 +262,6 @@ func List(ctx context.Context, ref string) ([]ArtifactInfo, error) {
 	return results, nil
 }
 
-// listRepoTags is a helper to list all tags in a given repository.
 func listRepoTags(ctx context.Context, registry string, repo *remote.Repository) ([]ArtifactInfo, error) {
 	var results []ArtifactInfo
 	repoName := repo.Reference.Repository
@@ -327,7 +305,6 @@ func listRepoTags(ctx context.Context, registry string, repo *remote.Repository)
 	return results, err
 }
 
-// splitRegistry splits a reference into registry and repository parts.
 func splitRegistry(ref string) (registry, repo string) {
 	parts := strings.SplitN(ref, "/", 2)
 	if len(parts) == 2 {
@@ -342,18 +319,29 @@ func newRegistry(ctx context.Context, host string) (*remote.Registry, error) {
 		return nil, fmt.Errorf("parse registry %q: %w", host, err)
 	}
 
-	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{
-		AllowPlaintextPut: false,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("load docker credential store: %w", err)
+	authClient := &auth.Client{
+		Client: retry.DefaultClient,
+		Cache:  auth.DefaultCache,
 	}
 
-	reg.Client = &auth.Client{
-		Client:     retry.DefaultClient,
-		Cache:      auth.DefaultCache,
-		Credential: credentials.Credential(credStore),
+	if regAuth, ok := config.GetRegistryAuth(host); ok && regAuth.Username != "" && regAuth.Password != "" {
+		authClient.Credential = auth.CredentialFunc(func(ctx context.Context, reg string) (auth.Credential, error) {
+			return auth.Credential{
+				Username: regAuth.Username,
+				Password: regAuth.Password,
+			}, nil
+		})
+	} else {
+		credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{
+			AllowPlaintextPut: false,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("load docker credential store: %w", err)
+		}
+		authClient.Credential = credentials.Credential(credStore)
 	}
+
+	reg.Client = authClient
 
 	return reg, nil
 }

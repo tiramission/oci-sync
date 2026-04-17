@@ -2,65 +2,39 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestExperimentalEnabled(t *testing.T) {
-	// Save original env and restore after test
-	origEnv := os.Getenv("OCI_SYNC_EXPERIMENTAL_ENABLED")
-	t.Cleanup(func() {
-		if origEnv != "" {
-			os.Setenv("OCI_SYNC_EXPERIMENTAL_ENABLED", origEnv)
-		} else {
-			os.Unsetenv("OCI_SYNC_EXPERIMENTAL_ENABLED")
-		}
-	})
+	t.Run("default true when not configured", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
 
-	t.Run("default true when not set", func(t *testing.T) {
-		os.Unsetenv("OCI_SYNC_EXPERIMENTAL_ENABLED")
+		globalConfig = nil
 		InitConfig()
 
 		got := ExperimentalEnabled()
 		assert.True(t, got, "expected true when not configured")
 	})
 
-	t.Run("returns true for true string", func(t *testing.T) {
-		os.Setenv("OCI_SYNC_EXPERIMENTAL_ENABLED", "true")
-		InitConfig()
+	t.Run("returns configured enabled value", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  enabled: false\n"), 0644)
+		assert.NoError(t, err)
 
-		got := ExperimentalEnabled()
-		assert.True(t, got)
-	})
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
 
-	t.Run("returns true for 1", func(t *testing.T) {
-		os.Setenv("OCI_SYNC_EXPERIMENTAL_ENABLED", "1")
-		InitConfig()
-
-		got := ExperimentalEnabled()
-		assert.True(t, got)
-	})
-
-	t.Run("returns false for false string", func(t *testing.T) {
-		os.Setenv("OCI_SYNC_EXPERIMENTAL_ENABLED", "false")
-		InitConfig()
-
-		got := ExperimentalEnabled()
-		assert.False(t, got)
-	})
-
-	t.Run("returns false for 0", func(t *testing.T) {
-		os.Setenv("OCI_SYNC_EXPERIMENTAL_ENABLED", "0")
-		InitConfig()
-
-		got := ExperimentalEnabled()
-		assert.False(t, got)
-	})
-
-	t.Run("returns false for invalid value", func(t *testing.T) {
-		os.Setenv("OCI_SYNC_EXPERIMENTAL_ENABLED", "invalid")
-		InitConfig()
+		globalConfig = nil
+		err = InitConfig()
+		assert.NoError(t, err)
 
 		got := ExperimentalEnabled()
 		assert.False(t, got)
@@ -68,28 +42,38 @@ func TestExperimentalEnabled(t *testing.T) {
 }
 
 func TestExperimentalRepo(t *testing.T) {
-	// Save original env and restore after test
-	origEnv := os.Getenv("OCI_SYNC_EXPERIMENTAL_REPO")
-	t.Cleanup(func() {
-		if origEnv != "" {
-			os.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", origEnv)
-		} else {
-			os.Unsetenv("OCI_SYNC_EXPERIMENTAL_REPO")
-		}
-	})
+	t.Run("returns error when experimental repo not set", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  enabled: true\n"), 0644)
+		assert.NoError(t, err)
 
-	t.Run("returns error when not configured", func(t *testing.T) {
-		os.Unsetenv("OCI_SYNC_EXPERIMENTAL_REPO")
-		InitConfig()
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
 
-		_, err := ExperimentalRepo()
+		globalConfig = nil
+		err = InitConfig()
+		assert.NoError(t, err)
+
+		_, err = ExperimentalRepo()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not configured")
 	})
 
-	t.Run("returns repo from environment variable", func(t *testing.T) {
-		os.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com/team/repo")
-		InitConfig()
+	t.Run("returns repo from config file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com/team/repo\n"), 0644)
+		assert.NoError(t, err)
+
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
+
+		globalConfig = nil
+		err = InitConfig()
+		assert.NoError(t, err)
 
 		got, err := ExperimentalRepo()
 		assert.NoError(t, err)
@@ -97,8 +81,18 @@ func TestExperimentalRepo(t *testing.T) {
 	})
 
 	t.Run("allows registry port", func(t *testing.T) {
-		os.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com:5000/team/repo")
-		InitConfig()
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com:5000/team/repo\n"), 0644)
+		assert.NoError(t, err)
+
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
+
+		globalConfig = nil
+		err = InitConfig()
+		assert.NoError(t, err)
 
 		got, err := ExperimentalRepo()
 		assert.NoError(t, err)
@@ -106,31 +100,40 @@ func TestExperimentalRepo(t *testing.T) {
 	})
 
 	t.Run("rejects digest reference", func(t *testing.T) {
-		os.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com/team/repo@sha256:abc")
-		InitConfig()
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com/team/repo@sha256:abc\n"), 0644)
+		assert.NoError(t, err)
 
-		_, err := ExperimentalRepo()
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
+
+		globalConfig = nil
+		err = InitConfig()
+		assert.NoError(t, err)
+
+		_, err = ExperimentalRepo()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "digest")
 	})
 
 	t.Run("rejects tagged repository", func(t *testing.T) {
-		os.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com/team/repo:latest")
-		InitConfig()
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com/team/repo:latest\n"), 0644)
+		assert.NoError(t, err)
 
-		_, err := ExperimentalRepo()
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
+
+		globalConfig = nil
+		err = InitConfig()
+		assert.NoError(t, err)
+
+		_, err = ExperimentalRepo()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "tag")
-	})
-
-	t.Run("environment variable takes precedence over config", func(t *testing.T) {
-		// Note: This test verifies the env var precedence logic
-		// by setting the env var which is checked first
-		os.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "env.registry.example.com/repo")
-		InitConfig()
-
-		got, err := ExperimentalRepo()
-		assert.NoError(t, err)
-		assert.Equal(t, "env.registry.example.com/repo", got)
 	})
 }

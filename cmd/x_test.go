@@ -2,24 +2,26 @@ package cmd
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/tiramission/oci-sync/internal/config"
 )
 
 func TestBuildExperimentalRemoteRef(t *testing.T) {
-	// Save original env and restore after test
-	origEnv := os.Getenv("OCI_SYNC_EXPERIMENTAL_REPO")
-	t.Cleanup(func() {
-		if origEnv != "" {
-			os.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", origEnv)
-		} else {
-			os.Unsetenv("OCI_SYNC_EXPERIMENTAL_REPO")
-		}
-	})
-
 	t.Run("builds ref from repo and tag", func(t *testing.T) {
-		t.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com/team/repo")
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com/team/repo\n"), 0644)
+		if err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
+
+		config.InitConfig()
 
 		got, err := buildExperimentalRemoteRef("v1")
 		if err != nil {
@@ -31,7 +33,18 @@ func TestBuildExperimentalRemoteRef(t *testing.T) {
 	})
 
 	t.Run("allows registry port", func(t *testing.T) {
-		t.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com:5000/team/repo")
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com:5000/team/repo\n"), 0644)
+		if err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
+
+		config.InitConfig()
 
 		got, err := buildExperimentalRemoteRef("v2")
 		if err != nil {
@@ -43,35 +56,58 @@ func TestBuildExperimentalRemoteRef(t *testing.T) {
 	})
 
 	t.Run("rejects empty tag", func(t *testing.T) {
-		t.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com/team/repo")
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com/team/repo\n"), 0644)
+		if err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
+
+		config.InitConfig()
 
 		if _, err := buildExperimentalRemoteRef(""); err == nil {
 			t.Fatal("expected error for empty tag")
 		}
 	})
 
-	t.Run("rejects tagged repository in environment variable", func(t *testing.T) {
-		t.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com/team/repo:latest")
+	t.Run("rejects tagged repository in config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com/team/repo:latest\n"), 0644)
+		if err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
+
+		config.InitConfig()
 
 		if _, err := buildExperimentalRemoteRef("v1"); err == nil {
-			t.Fatal("expected error for tagged environment variable")
+			t.Fatal("expected error for tagged repository in config")
 		}
 	})
 }
 
 func TestExperimentalRepo(t *testing.T) {
-	// Save original env and restore after test
-	origEnv := os.Getenv("OCI_SYNC_EXPERIMENTAL_REPO")
-	t.Cleanup(func() {
-		if origEnv != "" {
-			os.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", origEnv)
-		} else {
-			os.Unsetenv("OCI_SYNC_EXPERIMENTAL_REPO")
+	t.Run("returns repository from config file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com/team/repo\n"), 0644)
+		if err != nil {
+			t.Fatalf("failed to write config: %v", err)
 		}
-	})
 
-	t.Run("returns repository from environment variable", func(t *testing.T) {
-		t.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com/team/repo")
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
+
+		config.InitConfig()
 
 		got, err := experimentalRepo()
 		if err != nil {
@@ -82,8 +118,19 @@ func TestExperimentalRepo(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects digest reference in environment variable", func(t *testing.T) {
-		t.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com/team/repo@sha256:abc")
+	t.Run("rejects digest reference in config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com/team/repo@sha256:abc\n"), 0644)
+		if err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
+
+		config.InitConfig()
 
 		if _, err := experimentalRepo(); err == nil {
 			t.Fatal("expected error for digest reference")
@@ -92,21 +139,19 @@ func TestExperimentalRepo(t *testing.T) {
 }
 
 func TestConfigExperimentalRepo(t *testing.T) {
-	// Save original env and restore after test
-	origEnv := os.Getenv("OCI_SYNC_EXPERIMENTAL_REPO")
-	t.Cleanup(func() {
-		if origEnv != "" {
-			os.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", origEnv)
-		} else {
-			os.Unsetenv("OCI_SYNC_EXPERIMENTAL_REPO")
+	t.Run("returns repository from config file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com/team/repo\n"), 0644)
+		if err != nil {
+			t.Fatalf("failed to write config: %v", err)
 		}
-	})
 
-	// Initialize config for tests
-	config.InitConfig()
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
 
-	t.Run("returns repository from environment variable", func(t *testing.T) {
-		t.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com/team/repo")
+		config.InitConfig()
 
 		got, err := config.ExperimentalRepo()
 		if err != nil {
@@ -118,7 +163,18 @@ func TestConfigExperimentalRepo(t *testing.T) {
 	})
 
 	t.Run("allows registry port", func(t *testing.T) {
-		t.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com:5000/team/repo")
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com:5000/team/repo\n"), 0644)
+		if err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
+
+		config.InitConfig()
 
 		got, err := config.ExperimentalRepo()
 		if err != nil {
@@ -130,7 +186,18 @@ func TestConfigExperimentalRepo(t *testing.T) {
 	})
 
 	t.Run("rejects digest reference", func(t *testing.T) {
-		t.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com/team/repo@sha256:abc")
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com/team/repo@sha256:abc\n"), 0644)
+		if err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
+
+		config.InitConfig()
 
 		if _, err := config.ExperimentalRepo(); err == nil {
 			t.Fatal("expected error for digest reference")
@@ -138,7 +205,18 @@ func TestConfigExperimentalRepo(t *testing.T) {
 	})
 
 	t.Run("rejects tagged repository", func(t *testing.T) {
-		t.Setenv("OCI_SYNC_EXPERIMENTAL_REPO", "registry.example.com/team/repo:latest")
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "oci-sync.yaml")
+		err := os.WriteFile(configPath, []byte("experimental:\n  repo: registry.example.com/team/repo:latest\n"), 0644)
+		if err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		origCwd, _ := os.Getwd()
+		os.Chdir(tmpDir)
+		defer os.Chdir(origCwd)
+
+		config.InitConfig()
 
 		if _, err := config.ExperimentalRepo(); err == nil {
 			t.Fatal("expected error for tagged repository")

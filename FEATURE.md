@@ -8,14 +8,15 @@
 - `oci-sync push`：将本地文件同步到 OCI 兼容的镜像仓库中。
 - `oci-sync pull`：从 OCI 兼容的镜像仓库中同步文件到本地。
 - `oci-sync delete`：从 OCI 兼容的镜像仓库中删除文件(镜像)。
-- `oci-sync x push`：实验性快捷推送命令，通过环境变量提供 repository，仅用 `--tag` 指定远程标签。
-- `oci-sync x pull`：实验性快捷拉取命令，通过环境变量提供 repository，仅用 `--tag` 指定远程标签。
-- `oci-sync x list`：实验性快捷列举命令，通过环境变量提供 repository，直接列出所有 tags。
-- `oci-sync x delete`：实验性快捷删除命令，通过环境变量提供 repository，仅用 `--tag` 指定删除目标。
+- `oci-sync x push`：实验性快捷推送命令，通过配置文件提供 repository，仅用 `--tag` 指定远程标签。
+- `oci-sync x pull`：实验性快捷拉取命令，通过配置文件提供 repository，仅用 `--tag` 指定远程标签。
+- `oci-sync x list`：实验性快捷列举命令，通过配置文件提供 repository，直接列出所有 tags。
+- `oci-sync x delete`：实验性快捷删除命令，通过配置文件提供 repository，仅用 `--tag` 指定删除目标。
 
 
 ### 认证
-使用 docker credential store 进行认证，支持 macOS, Windows, Linux
+- 支持配置文件 `auths.<registry>.username/password` 为每个仓库配置独立凭据
+- 回退到 Docker credential store（`~/.docker/config.json`），支持 macOS, Windows, Linux
 
 
 ### 实现
@@ -67,16 +68,15 @@ oci-sync list --remote <registry>
 
 5. experimental commands
 
-```bash
-export OCI_SYNC_EXPERIMENTAL_REPO=<registry>/<repository>
+experimental 命令依赖配置文件中的 `experimental.repo`：
 
+```bash
 oci-sync x push --local <local_path> --tag <tag> --passphrase <passphrase>
 oci-sync x pull --tag <tag> --local <local_path> --passphrase <passphrase>
 oci-sync x list
 oci-sync x delete --tag <tag>
 ```
 
-- `OCI_SYNC_EXPERIMENTAL_REPO` 提供固定 repository，格式为 `<registry>/<repository>`
 - `--tag` 用于补全远程引用，最终组合为 `<registry>/<repository>:<tag>`
 - `--local` 仍然必需；该需求只是简化远程仓库输入，不改变本地文件/目录行为
 - `oci-sync x list` 不需要 `--tag`，直接列出该 repository 下的所有 tags
@@ -84,7 +84,7 @@ oci-sync x delete --tag <tag>
 
 ### 配置文件
 
-除了环境变量外，也可以使用配置文件来设置仓库地址和实验性命令开关。配置文件使用 YAML 格式，搜索路径如下：
+配置文件使用 YAML 格式，搜索路径如下：
 
 1. 当前工作目录 `./oci-sync.yaml`
 2. 用户配置目录 `~/.config/oci-sync/oci-sync.yaml`
@@ -93,13 +93,19 @@ oci-sync x delete --tag <tag>
 
 ```yaml
 experimental:
-  # 启用/禁用实验性命令（默认: true）
   enabled: true
-  # 实验性命令使用的仓库地址
   repo: registry.example.com/myteam/files
+
+auths:
+  registry.example.com:
+    username: myuser
+    password: mytoken
+  another.registry.com:
+    username: user2
+    password: token2
 ```
 
-配置优先级：**环境变量 > 配置文件**
+认证优先级：**配置文件 `auths` > Docker credential store**
 
 ## Nix 集成
 

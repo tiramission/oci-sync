@@ -1,6 +1,6 @@
 # oci-sync
 
-将本地文件或目录同步到 OCI 兼容的镜像仓库中。支持文件/目录、可选加密，使用 Docker credential store 进行认证。
+将本地文件或目录同步到 OCI 兼容的镜像仓库中。支持文件/目录、可选加密，支持配置文件凭据和 Docker credential store 认证。
 
 ## 安装
 
@@ -61,11 +61,7 @@ nix develop github:tiramission/oci-sync
 
 ## 前置条件
 
-已通过 `docker login` 登录目标仓库：
-
-```bash
-docker login registry.example.com
-```
+通过配置文件或 `docker login` 登录目标仓库。
 
 ## 使用
 
@@ -97,13 +93,7 @@ oci-sync pull -r registry.example.com/myrepo:latest -l ./output
 
 ### x push / x pull / x list / x delete — 实验性快捷命令
 
-先设置实验性仓库环境变量：
-
-```bash
-export OCI_SYNC_EXPERIMENTAL_REPO=registry.example.com/myteam/files
-```
-
-然后只通过 `--tag` 指定远程标签：
+实验性命令依赖配置文件中的 `experimental.repo`，只需通过 `--tag` 指定标签：
 
 ```bash
 # 推送目录
@@ -165,15 +155,9 @@ oci-sync list -r registry.example.com/myrepo -f yaml
 | `--format`, `-f` | 输出格式：`table`（默认）、`json`、`yaml` |
 | `--quiet`, `-q` | 开启静默模式，仅输出错误信息 |
 
-环境变量：
-
-| 变量名 | 说明 |
-|------|------|
-| `OCI_SYNC_EXPERIMENTAL_REPO` | `oci-sync x push/pull/list/delete` 使用的仓库，格式为 `<registry>/<repository>`，不包含 tag |
-
 ### 配置文件
 
-除了环境变量外，也可以使用配置文件来设置仓库地址。配置文件使用 YAML 格式，搜索路径如下：
+配置文件使用 YAML 格式，搜索路径如下：
 
 1. 当前工作目录 `./oci-sync.yaml`
 2. 用户配置目录 `~/.config/oci-sync/oci-sync.yaml`
@@ -182,20 +166,25 @@ oci-sync list -r registry.example.com/myrepo -f yaml
 
 ```yaml
 experimental:
-  # 启用/禁用实验性命令（默认: true）
   enabled: true
-  # 实验性命令使用的仓库地址
   repo: registry.example.com/myteam/files
-```
 
-配置优先级：**环境变量 > 配置文件**
+auths:
+  registry.example.com:
+    username: myuser
+    password: mytoken
+```
 
 可用配置项：
 
-| 配置项 | 对应环境变量 | 默认值 | 说明 |
-|--------|-------------|--------|------|
-| `experimental.enabled` | `OCI_SYNC_EXPERIMENTAL_ENABLED` | `true` | 是否启用实验性命令 |
-| `experimental.repo` | `OCI_SYNC_EXPERIMENTAL_REPO` | - | 实验性命令使用的仓库地址 |
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `experimental.enabled` | `true` | 是否启用实验性命令 |
+| `experimental.repo` | - | 实验性命令使用的仓库地址 |
+| `auths.<registry>.username` | - | 该仓库的认证用户名 |
+| `auths.<registry>.password` | - | 该仓库的认证密码或令牌 |
+
+认证优先级：**配置文件 `auths` > Docker credential store**
 
 ## 工作原理
 
@@ -205,7 +194,7 @@ experimental:
 
 加密使用 scrypt 从口令派生密钥（N=32768），每次加密使用随机 salt 和 nonce，安全可靠。
 
-认证直接读取 `~/.docker/config.json`，与 Docker credential store 完全兼容，支持 macOS Keychain、Windows Credential Manager 和 Linux secret service。
+认证支持配置文件 per-registry 凭据（`auths.<registry>`），也兼容 Docker credential store（`~/.docker/config.json`）。
 
 ## 详细设计
 
