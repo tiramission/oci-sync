@@ -21,23 +21,18 @@ in {
     settings = lib.mkOption {
       type = lib.types.submodule {
         options = {
-          experimental = lib.mkOption {
-            type = lib.types.submodule {
+          shortcuts = lib.mkOption {
+            type = lib.types.attrsOf (lib.types.submodule {
               options = {
-                enabled = lib.mkOption {
-                  type = lib.types.bool;
-                  default = true;
-                  description = "Enable experimental commands";
-                };
                 repo = lib.mkOption {
                   type = lib.types.str;
                   default = "";
-                  description = "Default repository for experimental commands";
+                  description = "Default repository for this shortcut command";
                 };
               };
-            };
+            });
             default = {};
-            description = "Experimental settings";
+            description = "Shortcut commands mapped to their default repositories";
           };
           auths = lib.mkOption {
             type = lib.types.attrsOf (lib.types.submodule {

@@ -63,6 +63,15 @@ build_binary() {
   )
 }
 
+setup_shortcut_config() {
+  echo "Setting up shortcut config..."
+  cat > "${WORK_DIR}/oci-sync.yaml" << EOF
+shortcuts:
+  x:
+    repo: ${TEST_REPO}
+EOF
+}
+
 prepare_test_data() {
   local source_dir="$1"
   local output_dir="$2"
@@ -92,11 +101,10 @@ push_artifact() {
     return
   fi
 
-  export OCI_SYNC_EXPERIMENTAL_REPO="${TEST_REPO}"
   if [[ -n "${passphrase}" ]]; then
-    "${BINARY_PATH}" x push --local "${source_dir}" --tag "${tag}" --passphrase "${passphrase}"
+    (cd "${WORK_DIR}" && "${BINARY_PATH}" x push --local "${source_dir}" --tag "${tag}" --passphrase "${passphrase}")
   else
-    "${BINARY_PATH}" x push --local "${source_dir}" --tag "${tag}"
+    (cd "${WORK_DIR}" && "${BINARY_PATH}" x push --local "${source_dir}" --tag "${tag}")
   fi
 }
 
@@ -108,8 +116,7 @@ list_artifacts() {
     return
   fi
 
-  export OCI_SYNC_EXPERIMENTAL_REPO="${TEST_REPO}"
-  "${BINARY_PATH}" x list
+  (cd "${WORK_DIR}" && "${BINARY_PATH}" x list)
 }
 
 pull_artifact() {
@@ -129,11 +136,10 @@ pull_artifact() {
     return
   fi
 
-  export OCI_SYNC_EXPERIMENTAL_REPO="${TEST_REPO}"
   if [[ -n "${passphrase}" ]]; then
-    "${BINARY_PATH}" x pull --tag "${tag}" --local "${output_dir}" --passphrase "${passphrase}"
+    (cd "${WORK_DIR}" && "${BINARY_PATH}" x pull --tag "${tag}" --local "${output_dir}" --passphrase "${passphrase}")
   else
-    "${BINARY_PATH}" x pull --tag "${tag}" --local "${output_dir}"
+    (cd "${WORK_DIR}" && "${BINARY_PATH}" x pull --tag "${tag}" --local "${output_dir}")
   fi
 }
 
@@ -148,8 +154,7 @@ delete_artifact() {
     return
   fi
 
-  export OCI_SYNC_EXPERIMENTAL_REPO="${TEST_REPO}"
-  "${BINARY_PATH}" x delete --tag "${tag}"
+  (cd "${WORK_DIR}" && "${BINARY_PATH}" x delete --tag "${tag}")
 }
 
 run_case() {
@@ -195,6 +200,7 @@ run_case() {
 }
 
 build_binary
+setup_shortcut_config
 run_case "standard" "plain" "${BASE_TAG}-standard-plain" ""
 run_case "standard" "encrypted" "${BASE_TAG}-standard-encrypted" "${ENCRYPTED_PASSPHRASE}"
 run_case "x" "plain" "${BASE_TAG}-x-plain" ""

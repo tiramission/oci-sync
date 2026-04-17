@@ -45,9 +45,8 @@ nix develop github:tiramission/oci-sync
           programs.oci-sync = {
             enable = true;
             settings = {
-              experimental = {
-                enabled = true;
-                repo = "registry.example.com/myteam/files";
+              shortcuts = {
+                x.repo = "registry.example.com/myteam/files";
               };
             };
           };
@@ -91,9 +90,9 @@ oci-sync pull --remote registry.example.com/myrepo:encrypted --local ./output --
 oci-sync pull -r registry.example.com/myrepo:latest -l ./output
 ```
 
-### x push / x pull / x list / x delete — 实验性快捷命令
+### <name> push / pull / list / delete — 动态快捷命令
 
-实验性命令依赖配置文件中的 `experimental.repo`，只需通过 `--tag` 指定标签：
+动态命令通过配置文件 `shortcuts.<name>.repo` 定义，只需通过 `--tag` 指定标签：
 
 ```bash
 # 推送目录
@@ -108,13 +107,13 @@ oci-sync x pull --tag latest --local ./output
 # 拉取并解密
 oci-sync x pull --tag encrypted --local ./output --passphrase mypassword
 
-# 列出实验性仓库下的所有 tags
+# 列出快捷仓库下的所有 tags
 oci-sync x list
 
 # 以 JSON 格式输出
 oci-sync x list --format json
 
-# 删除实验性仓库中的指定 tag
+# 删除快捷仓库中的指定 tag
 oci-sync x delete --tag old-release
 ```
 
@@ -150,7 +149,7 @@ oci-sync list -r registry.example.com/myrepo -f yaml
 |------|------|
 | `--local`, `-l` | 本地文件或目录路径（push）或目标目录（pull）|
 | `--remote`, `-r` | OCI 仓库引用 (push/pull/delete) 或注册表引用 (list) |
-| `--tag` | 实验性 `x push` / `x pull` / `x delete` 使用的标签 |
+| `--tag` | 快捷命令 `x push / x pull / x delete` 使用的标签 |
 | `--passphrase`| 加密/解密口令（可选） |
 | `--format`, `-f` | 输出格式：`table`（默认）、`json`、`yaml` |
 | `--quiet`, `-q` | 开启静默模式，仅输出错误信息 |
@@ -165,9 +164,9 @@ oci-sync list -r registry.example.com/myrepo -f yaml
 配置文件格式：
 
 ```yaml
-experimental:
-  enabled: true
-  repo: registry.example.com/myteam/files
+shortcuts:
+  x:
+    repo: registry.example.com/myteam/files
 
 auths:
   registry.example.com:
@@ -179,8 +178,7 @@ auths:
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `experimental.enabled` | `true` | 是否启用实验性命令 |
-| `experimental.repo` | - | 实验性命令使用的仓库地址 |
+| `shortcuts.<name>.repo` | - | 动态命令的默认仓库地址 |
 | `auths.<registry>.username` | - | 该仓库的认证用户名 |
 | `auths.<registry>.password` | - | 该仓库的认证密码或令牌 |
 

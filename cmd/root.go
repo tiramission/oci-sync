@@ -50,8 +50,8 @@ func init() {
 	rootCmd.AddCommand(newDeleteCmd())
 	rootCmd.AddCommand(newListCmd())
 
-	// Add experimental commands only if enabled
-	if config.ExperimentalEnabled() {
-		rootCmd.AddCommand(newExperimentalCmd())
+	// Add dynamic shortcut commands
+	for _, name := range config.ShortcutNames() {
+		rootCmd.AddCommand(newShortcutCmd(name))
 	}
 }

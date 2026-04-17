@@ -18,12 +18,13 @@ type RegistryAuth struct {
 	Password string `yaml:"password"`
 }
 
+type Shortcut struct {
+	Repo string `yaml:"repo"`
+}
+
 type Config struct {
-	Auths        map[string]RegistryAuth `yaml:"auths"`
-	Experimental struct {
-		Enabled bool   `yaml:"enabled"`
-		Repo    string `yaml:"repo"`
-	} `yaml:"experimental"`
+	Auths     map[string]RegistryAuth `yaml:"auths"`
+	Shortcuts map[string]Shortcut     `yaml:"shortcuts"`
 }
 
 var globalConfig *Config
@@ -48,7 +49,6 @@ func InitConfig() error {
 	}
 
 	globalConfig = &Config{Auths: make(map[string]RegistryAuth)}
-	globalConfig.Experimental.Enabled = true
 	return nil
 }
 
@@ -75,25 +75,36 @@ func GetRegistryAuth(host string) (RegistryAuth, bool) {
 	return auth, ok
 }
 
-func ExperimentalEnabled() bool {
+func GetShortcutRepo(name string) (string, error) {
 	if globalConfig == nil {
-		return true
+		return "", fmt.Errorf("config not initialized")
 	}
-	return globalConfig.Experimental.Enabled
-}
-
-func ExperimentalRepo() (string, error) {
-	if globalConfig == nil || globalConfig.Experimental.Repo == "" {
-		return "", fmt.Errorf("experimental repository not configured: set experimental.repo in config file")
+	shortcut, ok := globalConfig.Shortcuts[name]
+	if !ok {
+		return "", fmt.Errorf("shortcut %q not found: add shortcuts.%s.repo to config", name, name)
 	}
-	repo := globalConfig.Experimental.Repo
+	repo := shortcut.Repo
+	if repo == "" {
+		return "", fmt.Errorf("shortcut %q repo is empty", name)
+	}
 	if strings.Contains(repo, "@") {
-		return "", fmt.Errorf("repository must not be a digest reference (contains '@')")
+		return "", fmt.Errorf("shortcut %q repository must not be a digest reference (contains '@')", name)
 	}
 	lastColon := strings.LastIndex(repo, ":")
 	lastSlash := strings.LastIndex(repo, "/")
 	if lastColon > lastSlash {
-		return "", fmt.Errorf("repository must not include a tag (found ':' after last '/')")
+		return "", fmt.Errorf("shortcut %q repository must not include a tag (found ':' after last '/')", name)
 	}
 	return repo, nil
+}
+
+func ShortcutNames() []string {
+	if globalConfig == nil || globalConfig.Shortcuts == nil {
+		return nil
+	}
+	names := make([]string, 0, len(globalConfig.Shortcuts))
+	for name := range globalConfig.Shortcuts {
+		names = append(names, name)
+	}
+	return names
 }

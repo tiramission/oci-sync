@@ -8,10 +8,10 @@
 - `oci-sync push`：将本地文件同步到 OCI 兼容的镜像仓库中。
 - `oci-sync pull`：从 OCI 兼容的镜像仓库中同步文件到本地。
 - `oci-sync delete`：从 OCI 兼容的镜像仓库中删除文件(镜像)。
-- `oci-sync x push`：实验性快捷推送命令，通过配置文件提供 repository，仅用 `--tag` 指定远程标签。
-- `oci-sync x pull`：实验性快捷拉取命令，通过配置文件提供 repository，仅用 `--tag` 指定远程标签。
-- `oci-sync x list`：实验性快捷列举命令，通过配置文件提供 repository，直接列出所有 tags。
-- `oci-sync x delete`：实验性快捷删除命令，通过配置文件提供 repository，仅用 `--tag` 指定删除目标。
+- `oci-sync <name> push`：快捷推送命令，通过 `shortcuts.<name>.repo` 配置仓库，仅用 `--tag` 指定远程标签。
+- `oci-sync <name> pull`：快捷拉取命令，通过 `shortcuts.<name>.repo` 配置仓库，仅用 `--tag` 指定远程标签。
+- `oci-sync <name> list`：快捷列举命令，通过 `shortcuts.<name>.repo` 配置仓库，直接列出所有 tags。
+- `oci-sync <name> delete`：快捷删除命令，通过 `shortcuts.<name>.repo` 配置仓库，仅用 `--tag` 指定删除目标。
 
 
 ### 认证
@@ -66,21 +66,21 @@ oci-sync list --remote <registry>
 
 - remote 格式为 `<registry>/<repository>` 或单个 `<registry>`
 
-5. experimental commands
+5. shortcut commands
 
-experimental 命令依赖配置文件中的 `experimental.repo`：
+shortcut 命令依赖配置文件中的 `shortcuts.<name>.repo`：
 
 ```bash
-oci-sync x push --local <local_path> --tag <tag> --passphrase <passphrase>
-oci-sync x pull --tag <tag> --local <local_path> --passphrase <passphrase>
-oci-sync x list
-oci-sync x delete --tag <tag>
+oci-sync <name> push --local <local_path> --tag <tag> --passphrase <passphrase>
+oci-sync <name> pull --tag <tag> --local <local_path> --passphrase <passphrase>
+oci-sync <name> list
+oci-sync <name> delete --tag <tag>
 ```
 
 - `--tag` 用于补全远程引用，最终组合为 `<registry>/<repository>:<tag>`
 - `--local` 仍然必需；该需求只是简化远程仓库输入，不改变本地文件/目录行为
-- `oci-sync x list` 不需要 `--tag`，直接列出该 repository 下的所有 tags
-- `oci-sync x delete` 使用 `--tag` 组合出完整远程引用，并删除对应 artifact
+- `oci-sync <name> list` 不需要 `--tag`，直接列出该 repository 下的所有 tags
+- `oci-sync <name> delete` 使用 `--tag` 组合出完整远程引用，并删除对应 artifact
 
 ### 配置文件
 
@@ -92,9 +92,9 @@ oci-sync x delete --tag <tag>
 配置文件格式：
 
 ```yaml
-experimental:
-  enabled: true
-  repo: registry.example.com/myteam/files
+shortcuts:
+  x:
+    repo: registry.example.com/myteam/files
 
 auths:
   registry.example.com:
@@ -118,9 +118,8 @@ auths:
   programs.oci-sync = {
     enable = true;
     settings = {
-      experimental = {
-        enabled = true;
-        repo = "registry.example.com/myteam/files";
+      shortcuts = {
+        x.repo = "registry.example.com/myteam/files";
       };
     };
   };
@@ -133,5 +132,4 @@ auths:
 |------|------|--------|------|
 | `enable` | bool | false | 启用 oci-sync |
 | `package` | package | - | 自定义包版本 |
-| `settings.experimental.enabled` | bool | true | 启用实验性命令 |
-| `settings.experimental.repo` | string | "" | 实验性命令默认仓库 |
+| `settings.shortcuts.<name>.repo` | string | "" | 快捷命令默认仓库 |

@@ -19,7 +19,7 @@
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                         CLI 层                            │
-│ cmd/root.go   cmd/push.go   cmd/pull.go   cmd/x.go       │
+│ cmd/root.go   cmd/push.go   cmd/pull.go   cmd/shortcut.go│
 │ cmd/delete.go cmd/list.go                                │
 └──────────────┬───────────────┬──────────────┬────────────┘
                │              │
@@ -52,13 +52,13 @@ Registry → [oci.IsEncrypted] → 检查加密状态（manifest 只读）
          → [archive.Unpack] → 本地路径
 ```
 
-**数据流（experimental commands）**
+**数据流（shortcut commands）**
 ```
-CLI 参数传入（--tag + OCI_SYNC_EXPERIMENTAL_REPO）
+CLI 参数传入（--tag + shortcuts.<name>.repo 配置）
          → 拼装完整 remote ref
          → 复用标准 [push]/[pull]/[delete] 数据流
 
-CLI 参数传入（OCI_SYNC_EXPERIMENTAL_REPO）
+CLI 参数传入（shortcuts.<name>.repo 配置）
          → 解析 repository
          → 复用标准 [list] 数据流
 ```
@@ -93,7 +93,7 @@ oci-sync/
 │   ├── root.go                    # 根命令 & 全局配置（--quiet / -q）
 │   ├── push.go                    # push 子命令
 │   ├── pull.go                    # pull 子命令
-│   ├── ex.go                      # experimental 子命令组
+│   ├── shortcut.go                # 动态 shortcut 子命令组
 │   ├── delete.go                  # delete 子命令
 │   ├── list.go                    # list 子命令
 │   └── utils.go                   # 工具函数（formatBytes）
@@ -244,12 +244,10 @@ oci-sync pull -r <remote_path> -l <local_path> [--passphrase <passphrase>]
 | `--local`, `-l` | ✓ | 本地目标目录 |
 | `--passphrase` | 否 | 解密口令（内容加密时必须提供） |
 
-### x push
+### <name> push
 
 ```bash
-export OCI_SYNC_EXPERIMENTAL_REPO=<registry>/<repository>
-# 或使用配置文件
-oci-sync x push --local <local_path> --tag <tag> [--passphrase <passphrase>]
+oci-sync <name> push --local <local_path> --tag <tag> [--passphrase <passphrase>]
 ```
 
 | 参数 | 必选 | 说明 |
@@ -258,12 +256,10 @@ oci-sync x push --local <local_path> --tag <tag> [--passphrase <passphrase>]
 | `--tag` | ✓ | 目标标签 |
 | `--passphrase` | 否 | 加密口令，不提供则不加密 |
 
-### x pull
+### <name> pull
 
 ```bash
-export OCI_SYNC_EXPERIMENTAL_REPO=<registry>/<repository>
-# 或使用配置文件
-oci-sync x pull --tag <tag> --local <local_path> [--passphrase <passphrase>]
+oci-sync <name> pull --tag <tag> --local <local_path> [--passphrase <passphrase>]
 ```
 
 | 参数 | 必选 | 说明 |
@@ -272,24 +268,20 @@ oci-sync x pull --tag <tag> --local <local_path> [--passphrase <passphrase>]
 | `--local`, `-l` | ✓ | 本地目标目录 |
 | `--passphrase` | 否 | 解密口令（内容加密时必须提供） |
 
-### x list
+### <name> list
 
 ```bash
-export OCI_SYNC_EXPERIMENTAL_REPO=<registry>/<repository>
-# 或使用配置文件
-oci-sync x list [--format table|json|yaml]
+oci-sync <name> list [--format table|json|yaml]
 ```
 
 | 参数 | 必选 | 说明 |
 |------|------|------|
 | `--format`, `-f` | 否 | 输出格式：`table`（默认）、`json`、`yaml` |
 
-### x delete
+### <name> delete
 
 ```bash
-export OCI_SYNC_EXPERIMENTAL_REPO=<registry>/<repository>
-# 或使用配置文件
-oci-sync x delete --tag <tag>
+oci-sync <name> delete --tag <tag>
 ```
 
 | 参数 | 必选 | 说明 |
@@ -304,9 +296,11 @@ oci-sync x delete --tag <tag>
 
 **配置文件格式：**
 ```yaml
-experimental:
-  enabled: true
-  repo: <registry>/<repository>
+shortcuts:
+  <name>:
+    repo: <registry>/<repository>
+  x:
+    repo: <registry>/<repository>
 
 auths:
   <registry1.example.com>:
@@ -321,8 +315,7 @@ auths:
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `experimental.enabled` | `true` | 是否启用实验性命令 |
-| `experimental.repo` | - | 实验性命令使用的仓库地址 |
+| `shortcuts.<name>.repo` | - | 动态命令的默认仓库地址 |
 | `auths.<registry>.username` | - | 该仓库的认证用户名 |
 | `auths.<registry>.password` | - | 该仓库的认证密码或令牌 |
 
