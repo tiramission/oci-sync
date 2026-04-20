@@ -12,40 +12,37 @@ Environment variables:
 
 import sys
 import atexit
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from rich.console import Console
 from rich.table import Table
 
-from .config import TEST_CASES, REPO_NAME, BASE_TAG
-from .env import build_binary, setup_shortcut_config, cleanup_workdir
+from .config import TEST_CASES, BASE_TAG, WORK_DIR
+from .env import setup_shortcut_config, cleanup_workdir
 from .case import run_case
-from .state import console, get_errors, incr_errors
+from .state import console
 
 atexit.register(cleanup_workdir)
 
 
 def main():
-    build_binary()
+    WORK_DIR.mkdir(parents=True, exist_ok=True)
+    console.print("Building oci-sync binary...\n")
     setup_shortcut_config()
 
     results = {}
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(run_case, *case): case for case in TEST_CASES}
-        for future in as_completed(futures):
-            case = futures[future]
-            try:
-                success = future.result()
-                results[case] = success
-            except Exception as e:
-                console.print(f"[red]Case {case} failed: {e}[/red]")
-                results[case] = False
-                incr_errors()
+    for case in TEST_CASES:
+        try:
+            success = run_case(*case)
+            results[case] = success
+        except Exception as e:
+            console.print(f"[red]Case {case} failed: {e}[/red]")
+            results[case] = False
 
     print_results(results)
 
-    if get_errors() > 0:
-        console.print(f"\n[bold red]{get_errors()} test(s) failed![/bold red]")
+    failed = sum(1 for s in results.values() if not s)
+    if failed > 0:
+        console.print(f"\n[bold red]{failed} test(s) failed![/bold red]")
         sys.exit(1)
 
     tags = f"{BASE_TAG}-standard-plain, {BASE_TAG}-standard-encrypted, {BASE_TAG}-x-plain, {BASE_TAG}-x-encrypted"
