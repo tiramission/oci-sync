@@ -58,17 +58,12 @@ func runList(ctx context.Context, repoPath string, format string, filterLabels [
 			for _, l := range filterLabels {
 				parts := strings.SplitN(l, "=", 2)
 				if len(parts) == 2 {
-					if a.Labels == nil || a.Labels[parts[0]] != parts[1] {
+					if v, ok := a.Labels[parts[0]]; !ok || v != parts[1] {
 						match = false
 						break
 					}
 				} else {
-					if a.Labels == nil {
-						match = false
-						break
-					}
-					_, exists := a.Labels[parts[0]]
-					if !exists {
+					if v, ok := a.Labels[parts[0]]; !ok || v == "" {
 						match = false
 						break
 					}
