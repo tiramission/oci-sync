@@ -41,16 +41,16 @@ nix flake update                 # 更新 flake.lock 依赖
 ```
 
 **集成测试：**
-- 完整运行时检查：`bash temps/run-basic-check.sh`
+- 完整运行时检查：`cd e2e && uv run -m e2e`
   - 必须：`OCI_SYNC_TEST_REPO` 环境变量（如 `registry.example.com/test/repo`）
   - 可选：`OCI_SYNC_TEST_TAG_BASE`、`OCI_SYNC_TEST_PASSPHRASE`
-  - 测试标准和 shortcut 命令
+  - 测试 push/list/pull/delete 完整流程
   - 测试构件自动清理，除非设置 `OCI_SYNC_KEEP_WORKDIR=1`
 
 **临时文件和测试数据：**
-- 总是在 `temps/` 目录下创建临时文件和构建产物
+- Go 构建产物：`temps/` 目录下创建（已在 .gitignore 中）
+- e2e 测试产物：`e2e/runtime-check/` 子目录（已在 e2e/.gitignore 中）
 - 禁止在项目根目录创建临时文件
-- `temps/runtime-check/` 子目录由测试脚本自动创建
 
 ## 🔧 代码规范（已在代码库中验证）
 
@@ -91,6 +91,7 @@ nix/              # Nix flake 包和开发 shell
 docs/
   design.md       # 完整架构和 API 文档
 temps/            # 测试产物和构建输出（git 忽略）
+e2e/              # Python e2e 测试项目（独立 uv 项目）
 ```
 
 ## 🎯 关键实现注意事项
