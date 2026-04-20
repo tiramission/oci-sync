@@ -36,7 +36,7 @@ type ociManifest struct {
 	Annotations map[string]string    `json:"annotations,omitempty"`
 }
 
-func Push(ctx context.Context, data []byte, ref string, encrypted bool) error {
+func Push(ctx context.Context, data []byte, ref string, encrypted bool, labels map[string]string) error {
 	repo, err := newRepository(ctx, ref)
 	if err != nil {
 		return err
@@ -55,6 +55,9 @@ func Push(ctx context.Context, data []byte, ref string, encrypted bool) error {
 		annotations[AnnotationEncrypted] = "true"
 	} else {
 		annotations[AnnotationEncrypted] = "false"
+	}
+	for k, v := range labels {
+		annotations[k] = v
 	}
 
 	configBytes := emptyConfigBytes()
@@ -215,14 +218,75 @@ func Delete(ctx context.Context, ref string) error {
 	return nil
 }
 
+func UpdateAnnotations(ctx context.Context, ref string, updates map[string]string, removeKeys []string) error {
+	repo, err := newRepository(ctx, ref)
+	if err != nil {
+		return err
+	}
+
+	desc, err := repo.Resolve(ctx, repo.Reference.Reference)
+	if err != nil {
+		return fmt.Errorf("resolve tag/digest: %w", err)
+	}
+
+	manifestRC, err := repo.Fetch(ctx, desc)
+	if err != nil {
+		return fmt.Errorf("fetch manifest: %w", err)
+	}
+	defer manifestRC.Close()
+
+	manifestBytes, err := io.ReadAll(manifestRC)
+	if err != nil {
+		return fmt.Errorf("read manifest: %w", err)
+	}
+
+	var manifest ociManifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		return fmt.Errorf("unmarshal manifest: %w", err)
+	}
+
+	if manifest.Annotations == nil {
+		manifest.Annotations = make(map[string]string)
+	}
+
+	for k, v := range updates {
+		manifest.Annotations[k] = v
+	}
+	for _, k := range removeKeys {
+		delete(manifest.Annotations, k)
+	}
+
+	newManifestBytes, err := json.Marshal(manifest)
+	if err != nil {
+		return fmt.Errorf("marshal manifest: %w", err)
+	}
+
+	newDesc := ocispec.Descriptor{
+		MediaType: ocispec.MediaTypeImageManifest,
+		Digest:    digest.FromBytes(newManifestBytes),
+		Size:      int64(len(newManifestBytes)),
+	}
+
+	if err := repo.Push(ctx, newDesc, bytes.NewReader(newManifestBytes)); err != nil {
+		return fmt.Errorf("push manifest: %w", err)
+	}
+
+	if err := repo.Tag(ctx, newDesc, repo.Reference.Reference); err != nil {
+		return fmt.Errorf("update tag: %w", err)
+	}
+
+	return nil
+}
+
 type ArtifactInfo struct {
-	FullName  string `json:"fullName" yaml:"fullName"`
-	Repo      string `json:"repo" yaml:"repo"`
-	Tag       string `json:"tag" yaml:"tag"`
-	Digest    string `json:"digest" yaml:"digest"`
-	Encrypted bool   `json:"encrypted" yaml:"encrypted"`
-	Version   string `json:"version" yaml:"version"`
-	Size      int64  `json:"size" yaml:"size"`
+	FullName  string            `json:"fullName" yaml:"fullName"`
+	Repo      string            `json:"repo" yaml:"repo"`
+	Tag       string            `json:"tag" yaml:"tag"`
+	Digest    string            `json:"digest" yaml:"digest"`
+	Encrypted bool              `json:"encrypted" yaml:"encrypted"`
+	Version   string            `json:"version" yaml:"version"`
+	Size      int64             `json:"size" yaml:"size"`
+	Labels    map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
 }
 
 func List(ctx context.Context, ref string) ([]ArtifactInfo, error) {
@@ -295,6 +359,12 @@ func listRepoTags(ctx context.Context, registry string, repo *remote.Repository)
 				if len(manifest.Layers) > 0 {
 					size = manifest.Layers[0].Size
 				}
+				labels := make(map[string]string)
+				for k, v := range manifest.Annotations {
+					if !strings.HasPrefix(k, "io.oci-sync.") {
+						labels[k] = v
+					}
+				}
 				results = append(results, ArtifactInfo{
 					FullName:  registry + "/" + repoName + ":" + tag,
 					Repo:      repoName,
@@ -303,6 +373,7 @@ func listRepoTags(ctx context.Context, registry string, repo *remote.Repository)
 					Encrypted: encStr == "true",
 					Version:   val,
 					Size:      size,
+					Labels:    labels,
 				})
 			}
 		}

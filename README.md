@@ -113,6 +113,9 @@ oci-sync x list
 # 以 JSON 格式输出
 oci-sync x list --format json
 
+# 筛选包含特定标签的镜像
+oci-sync x list --label app=myapp
+
 # 删除快捷仓库中的指定 tag
 oci-sync x delete --tag old-release
 ```
@@ -141,6 +144,38 @@ oci-sync list -r registry.example.com/myrepo --format json
 
 # 以 YAML 格式输出
 oci-sync list -r registry.example.com/myrepo -f yaml
+
+# 筛选包含特定标签的镜像
+oci-sync list -r registry.example.com/myrepo --label app=myapp
+
+# 筛选包含特定标签 key 的镜像
+oci-sync list -r registry.example.com/myrepo --label env
+```
+
+### label — 管理标签
+
+```bash
+# 设置标签
+oci-sync label set --remote registry.example.com/myrepo:tag key1=value1 key2=value2
+
+# 设置空值标签
+oci-sync label set --remote registry.example.com/myrepo:tag app=
+
+# 删除标签
+oci-sync label unset --remote registry.example.com/myrepo:tag key1 key2
+```
+
+### alias — 管理 shortcuts
+
+```bash
+# 列出所有 shortcuts
+oci-sync alias list
+
+# 添加 shortcut
+oci-sync alias add x --repo registry.example.com/myteam/files
+
+# 删除 shortcut
+oci-sync alias remove x
 ```
 
 ### 参数说明
@@ -152,6 +187,7 @@ oci-sync list -r registry.example.com/myrepo -f yaml
 | `--tag` | 快捷命令 `x push / x pull / x delete` 使用的标签 |
 | `--passphrase`| 加密/解密口令（可选） |
 | `--format`, `-f` | 输出格式：`table`（默认）、`json`、`yaml` |
+| `--label` | 设置/筛选标签（格式：`key=value`，value 可为空；仅 `key` 时检查 key 是否存在） |
 | `--quiet`, `-q` | 开启静默模式，仅输出错误信息 |
 
 ### 配置文件

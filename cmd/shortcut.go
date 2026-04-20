@@ -27,6 +27,7 @@ the config file (shortcuts.%s.repo) and only require a tag flag for the remote r
 
 func newShortcutPushCmd(name string) *cobra.Command {
 	var local, tag, passphrase string
+	var labels []string
 
 	cmd := &cobra.Command{
 		Use:   "push [flags]",
@@ -34,13 +35,14 @@ func newShortcutPushCmd(name string) *cobra.Command {
 		Long: fmt.Sprintf(`Push local files or directories to the configured shortcut repository.
 Only --tag is required for the remote side. (Set shortcuts.%s.repo in config file)`, name),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runShortcutPush(cmd.Context(), name, local, tag, passphrase)
+			return runShortcutPush(cmd.Context(), name, local, tag, passphrase, labels)
 		},
 	}
 
 	cmd.Flags().StringVarP(&local, "local", "l", "", "local file or directory path")
 	cmd.Flags().StringVar(&tag, "tag", "", fmt.Sprintf("artifact tag for the %q shortcut repository", name))
 	cmd.Flags().StringVar(&passphrase, "passphrase", "", "passphrase for encryption (leave empty for no encryption)")
+	cmd.Flags().StringArrayVar(&labels, "label", []string{}, "labels to set on the artifact (key=value, can be repeated)")
 	cmd.MarkFlagRequired("local")
 	cmd.MarkFlagRequired("tag")
 	return cmd
@@ -69,17 +71,20 @@ Only --tag is required for the remote side. (Set shortcuts.%s.repo in config fil
 
 func newShortcutListCmd(name string) *cobra.Command {
 	var format string
+	var labels []string
+
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: fmt.Sprintf("List artifacts in the %q shortcut repository", name),
 		Long: fmt.Sprintf(`List artifacts in the configured shortcut repository.
 This command resolves the repository from config and lists all tags. (Set shortcuts.%s.repo in config file)`, name),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runShortcutList(cmd.Context(), name, format)
+			return runShortcutList(cmd.Context(), name, format, labels)
 		},
 	}
 
 	cmd.Flags().StringVarP(&format, "format", "f", "table", "output format (table, json, yaml)")
+	cmd.Flags().StringArrayVar(&labels, "label", []string{}, "filter by labels (key=value, can be repeated)")
 	return cmd
 }
 
@@ -115,12 +120,12 @@ func buildShortcutRemoteRef(name, tag string) (string, error) {
 	return repo + ":" + tag, nil
 }
 
-func runShortcutPush(ctx context.Context, name, localPath, tag, passphrase string) error {
+func runShortcutPush(ctx context.Context, name, localPath, tag, passphrase string, labels []string) error {
 	remotePath, err := buildShortcutRemoteRef(name, tag)
 	if err != nil {
 		return err
 	}
-	return runPush(ctx, localPath, remotePath, passphrase)
+	return runPush(ctx, localPath, remotePath, passphrase, labels)
 }
 
 func runShortcutPull(ctx context.Context, name, tag, localPath, passphrase string) error {
@@ -131,12 +136,12 @@ func runShortcutPull(ctx context.Context, name, tag, localPath, passphrase strin
 	return runPull(ctx, remotePath, localPath, passphrase)
 }
 
-func runShortcutList(ctx context.Context, name, format string) error {
+func runShortcutList(ctx context.Context, name, format string, labels []string) error {
 	repo, err := config.GetShortcutRepo(name)
 	if err != nil {
 		return err
 	}
-	return runList(ctx, repo, format)
+	return runList(ctx, repo, format, labels)
 }
 
 func runShortcutDelete(ctx context.Context, name, tag string) error {

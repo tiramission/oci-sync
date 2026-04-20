@@ -108,3 +108,27 @@ func ShortcutNames() []string {
 	}
 	return names
 }
+
+type ShortcutInfo struct {
+	Name string
+	Repo string
+}
+
+func GetAllShortcuts() []ShortcutInfo {
+	if globalConfig == nil || globalConfig.Shortcuts == nil {
+		return nil
+	}
+	infos := make([]ShortcutInfo, 0, len(globalConfig.Shortcuts))
+	for name, shortcut := range globalConfig.Shortcuts {
+		infos = append(infos, ShortcutInfo{Name: name, Repo: shortcut.Repo})
+	}
+	return infos
+}
+
+func HasShortcut(name string) bool {
+	if globalConfig == nil || globalConfig.Shortcuts == nil {
+		return false
+	}
+	_, ok := globalConfig.Shortcuts[name]
+	return ok
+}

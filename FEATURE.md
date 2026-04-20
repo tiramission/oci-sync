@@ -8,9 +8,15 @@
 - `oci-sync push`：将本地文件同步到 OCI 兼容的镜像仓库中。
 - `oci-sync pull`：从 OCI 兼容的镜像仓库中同步文件到本地。
 - `oci-sync delete`：从 OCI 兼容的镜像仓库中删除文件(镜像)。
-- `oci-sync <name> push`：快捷推送命令，通过 `shortcuts.<name>.repo` 配置仓库，仅用 `--tag` 指定远程标签。
+- `oci-sync list`：列出 OCI 仓库中的镜像记录，支持标签筛选。
+- `oci-sync label set`：为已存在的镜像设置标签。
+- `oci-sync label unset`：删除镜像上的标签。
+- `oci-sync alias list`：列出所有配置的 shortcuts。
+- `oci-sync alias add`：添加新的 shortcut。
+- `oci-sync alias remove`：删除 shortcut。
+- `oci-sync <name> push`：快捷推送命令，通过 `shortcuts.<name>.repo` 配置仓库，仅用 `--tag` 指定远程标签，支持 `--label`。
 - `oci-sync <name> pull`：快捷拉取命令，通过 `shortcuts.<name>.repo` 配置仓库，仅用 `--tag` 指定远程标签。
-- `oci-sync <name> list`：快捷列举命令，通过 `shortcuts.<name>.repo` 配置仓库，直接列出所有 tags。
+- `oci-sync <name> list`：快捷列举命令，通过 `shortcuts.<name>.repo` 配置仓库，直接列出所有 tags，支持 `--label` 筛选。
 - `oci-sync <name> delete`：快捷删除命令，通过 `shortcuts.<name>.repo` 配置仓库，仅用 `--tag` 指定删除目标。
 
 
@@ -26,14 +32,15 @@
 1. push
 
 ```bash
-oci-sync push --local <local_path> --remote <remote_path> --passphrase <passphrase>
+oci-sync push --local <local_path> --remote <remote_path> --passphrase <passphrase> --label <key=value>
 # 或使用简写
-oci-sync push -l <local_path> -r <remote_path> --passphrase <passphrase>
+oci-sync push -l <local_path> -r <remote_path> --passphrase <passphrase> --label <key=value>
 ```
 
 - remote 格式为 `<registry>/<repository>:<tag>`
 - local 可以是文件或目录
 - passphrase 为可选参数，如果提供了 passphrase，则文件会被加密
+- label 为可选参数，可以设置多个标签，格式为 `key=value`，value 可为空字符串
 
 2. pull
 
@@ -62,18 +69,46 @@ oci-sync delete --remote <remote_path>
 oci-sync list --remote <registry>/<repository>
 # 列出整个注册表的所有镜像仓库
 oci-sync list --remote <registry>
+# 按标签筛选
+oci-sync list --remote <registry>/<repository> --label app=myapp
+oci-sync list --remote <registry>/<repository> --label app --label env=prod
 ```
 
 - remote 格式为 `<registry>/<repository>` 或单个 `<registry>`
+- --label 筛选标签，`key=value` 精确匹配，`key` 仅检查 key 是否存在
 
-5. shortcut commands
+5. label
+
+```bash
+# 设置标签
+oci-sync label set --remote <registry>/<repo>:<tag> key1=value1 key2=value2
+oci-sync label set --remote <registry>/<repo>:<tag> app=  # 设置空值
+
+# 删除标签
+oci-sync label unset --remote <registry>/<repo>:<tag> key1 key2
+```
+
+6. alias
+
+```bash
+# 列出所有 shortcuts
+oci-sync alias list
+
+# 添加 shortcut
+oci-sync alias add <name> --repo <registry>/<repository>
+
+# 删除 shortcut
+oci-sync alias remove <name>
+```
+
+7. shortcut commands
 
 shortcut 命令依赖配置文件中的 `shortcuts.<name>.repo`：
 
 ```bash
-oci-sync <name> push --local <local_path> --tag <tag> --passphrase <passphrase>
+oci-sync <name> push --local <local_path> --tag <tag> --passphrase <passphrase> --label <key>[=<value>]
 oci-sync <name> pull --tag <tag> --local <local_path> --passphrase <passphrase>
-oci-sync <name> list
+oci-sync <name> list [--format table|json|yaml] [--label <key>[=<value>]]
 oci-sync <name> delete --tag <tag>
 ```
 

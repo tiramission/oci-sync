@@ -49,6 +49,8 @@ func init() {
 	rootCmd.AddCommand(newPullCmd())
 	rootCmd.AddCommand(newDeleteCmd())
 	rootCmd.AddCommand(newListCmd())
+	rootCmd.AddCommand(newLabelCmd())
+	rootCmd.AddCommand(newAliasCmd())
 
 	// Add dynamic shortcut commands
 	for _, name := range config.ShortcutNames() {

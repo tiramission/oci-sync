@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"charm.land/log/v2"
 	"github.com/spf13/cobra"
@@ -13,6 +14,7 @@ import (
 
 func newPushCmd() *cobra.Command {
 	var local, remote, passphrase string
+	var labels []string
 
 	cmd := &cobra.Command{
 		Use:   "push [flags]",
@@ -23,19 +25,28 @@ and push to an OCI-compatible image registry.
 remote format: <registry>/<repository>:<tag>
 Example: registry-1.docker.io/myuser/myrepo:latest`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPush(cmd.Context(), local, remote, passphrase)
+			return runPush(cmd.Context(), local, remote, passphrase, labels)
 		},
 	}
 
 	cmd.Flags().StringVarP(&local, "local", "l", "", "local file or directory path")
 	cmd.Flags().StringVarP(&remote, "remote", "r", "", "remote OCI registry reference (format: <registry>/<repository>:<tag>)")
 	cmd.Flags().StringVar(&passphrase, "passphrase", "", "passphrase for encryption (leave empty for no encryption)")
+	cmd.Flags().StringArrayVar(&labels, "label", []string{}, "labels to set on the artifact (key=value, can be repeated)")
 	cmd.MarkFlagRequired("local")
 	cmd.MarkFlagRequired("remote")
 	return cmd
 }
 
-func runPush(ctx context.Context, localPath, remotePath, passphrase string) error {
+func runPush(ctx context.Context, localPath, remotePath, passphrase string, labels []string) error {
+	labelMap := make(map[string]string)
+	for _, l := range labels {
+		parts := strings.SplitN(l, "=", 2)
+		if len(parts) >= 2 {
+			labelMap[parts[0]] = parts[1]
+		}
+	}
+
 	log.Info("Packing files...", "path", localPath)
 	data, err := archive.Pack(localPath)
 	if err != nil {
@@ -54,7 +65,7 @@ func runPush(ctx context.Context, localPath, remotePath, passphrase string) erro
 	}
 
 	log.Info("Pushing to registry...", "ref", remotePath)
-	if err := oci.Push(ctx, data, remotePath, encrypted); err != nil {
+	if err := oci.Push(ctx, data, remotePath, encrypted, labelMap); err != nil {
 		return fmt.Errorf("push failed: %w", err)
 	}
 
