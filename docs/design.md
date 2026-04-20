@@ -111,18 +111,23 @@ oci-sync/
 │   ├── list.go                    # list 子命令
 │   ├── label.go                   # label 子命令 (set/unset)
 │   ├── alias.go                   # alias 子命令 (list/add/remove)
+│   ├── tui.go                     # tui 子命令（交互式）
 │   └── utils.go                   # 工具函数（formatBytes）
 └── internal/
     ├── config/
-    │   └── config.go              # 配置文件支持（Viper）
+    │   └── config.go              # 配置文件支持
     ├── archive/
     │   ├── archive.go             # tar.gz 打包/解包
     │   └── archive_test.go        # 单元测试
     ├── crypto/
     │   ├── crypto.go              # AES-256-GCM 加密/解密
     │   └── crypto_test.go         # 单元测试
-    └── oci/
-        └── oci.go                 # OCI push/pull（oras-go v2）
+    ├── oci/
+    │   └── oci.go                 # OCI push/pull（oras-go v2）
+    ├── tui/
+    │   ├── manager.go             # TUI 主管理器
+    │   ├── operations.go          # OCI 操作包装
+    │   └── run.go                 # 启动入口
 ```
 
 ---
@@ -395,9 +400,62 @@ oci-sync alias remove <name>
 
 **注意**：若配置文件不可写，会输出警告但不会报错。
 
+### tui
+
+```bash
+oci-sync tui
+```
+
+启动交互式 TUI 进行 artifacts 管理。无需任何命令行参数。
+
 ---
 
-## 8. 后续扩展方向
+## 8. TUI 模块设计
+
+### 8.1 `internal/tui` — 交互式终端界面
+
+TUI 使用 `github.com/charmbracelet/huh` 和 `github.com/charmbracelet/lipgloss` 库实现。
+
+| 类型 | 位置 | 说明 |
+|------|------|------|
+| `Manager` | `manager.go` | TUI 主管理器，处理状态和用户交互 |
+| `Operations` | `operations.go` | OCI 操作函数包装器（Push/Pull/Delete） |
+| `Run()` | `run.go` | 启动 TUI 的入口点 |
+
+**主要功能**
+
+1. **shortcuts 浏览**：显示所有配置的 shortcuts，支持选择
+2. **artifacts 管理**：
+   - 列表查看：显示每个 shortcut 下的所有 artifacts
+   - 上传：交互式输入本地路径、标签、密码等
+   - 下载：选择 artifact 并指定下载路径
+   - 删除：确认删除指定 artifact
+   - 详情查看：显示 artifact 的加密状态、标签等信息
+   - 标签编辑：修改 artifact 的标签（计划中）
+
+**用户交互流程**
+
+```
+启动 TUI
+  ↓
+选择 Shortcut
+  ↓
+浏览 Artifacts (列表/上传/下载/删除/查看详情/编辑标签)
+  ↓
+返回或退出
+```
+
+**实现特点**
+
+- 使用表单式交互，友好直观
+- 敏感信息（密码）自动屏蔽
+- 自动加密/解密 artifacts
+- 错误和成功信息实时显示
+- 支持刷新 artifacts 列表
+
+---
+
+## 9. 后续扩展方向
 
 - **`--insecure`**：支持 HTTP（非 TLS）仓库
 - **`--platform`**：多架构 manifest list 支持

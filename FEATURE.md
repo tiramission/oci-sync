@@ -14,6 +14,7 @@
 - `oci-sync alias list`：列出所有配置的 shortcuts。
 - `oci-sync alias add`：添加新的 shortcut。
 - `oci-sync alias remove`：删除 shortcut。
+- `oci-sync tui`：启动交互式 TUI 进行 artifacts 管理。
 - `oci-sync <name> push`：快捷推送命令，通过 `shortcuts.<name>.repo` 配置仓库，仅用 `--tag` 指定远程标签，支持 `--label`。
 - `oci-sync <name> pull`：快捷拉取命令，通过 `shortcuts.<name>.repo` 配置仓库，仅用 `--tag` 指定远程标签。
 - `oci-sync <name> list`：快捷列举命令，通过 `shortcuts.<name>.repo` 配置仓库，直接列出所有 tags，支持 `--label` 筛选。

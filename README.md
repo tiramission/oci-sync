@@ -178,6 +178,44 @@ oci-sync alias add x --repo registry.example.com/myteam/files
 oci-sync alias remove x
 ```
 
+### tui — 交互式终端界面
+
+启动全屏交互式 TUI 来管理 shortcuts 和 artifacts：
+
+```bash
+oci-sync tui
+```
+
+**功能特性**
+
+- 📋 **浏览 Shortcuts**：选择并浏览所有配置的 shortcuts
+- 📦 **查看 Artifacts**：列出每个 shortcut 仓库中的所有 artifacts，显示加密状态和标签
+- 🔍 **详细信息**：查看每个 artifact 的完整信息（摘要、加密状态、版本、标签等）
+- 📤 **上传**：交互式分步上传（输入路径→指定标签→可选加密）
+- ⬇️ **下载**：交互式分步下载（选择目标位置→输入密码，自动解密）
+- 🗑️ **删除**：删除 artifacts（带确认提示）
+- 🔄 **刷新**：实时更新 artifacts 列表
+
+**快捷键**
+
+| 快捷键 | 功能 | 场景 |
+|------|------|------|
+| `↑/↓` 或 `k/j` | 导航 | 所有列表 |
+| `Enter` | 进入/选择 | 列表、表单 |
+| `u` | 上传 | Artifacts 列表 |
+| `d` | 下载 | Artifacts 列表 |
+| `x` | 删除 | Artifacts 列表 |
+| `enter` | 查看/提交 | Artifacts 列表、表单 |
+| `Esc` | 取消 | 模态对话框 |
+| `y/n` | 确认/取消 | 确认对话框 |
+| `b` | 返回 | Artifacts/详情 |
+| `r` | 刷新 | Artifacts 列表 |
+| `q` | 退出 | 全局 |
+
+**密码输入**
+
+上传/下载时的密码输入会自动屏蔽显示（`•`），确保隐私安全。
+
 ### 参数说明
 
 | 参数 | 说明 |
