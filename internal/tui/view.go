@@ -126,8 +126,15 @@ func (m *Model) renderShortcutsPanel(width int, height int) string {
 		return sb.String()
 	}
 
+	// Show all shortcuts (limit by available height)
+	maxItems := height - 3 // Leave space for header
+	if maxItems < 0 {
+		maxItems = 0
+	}
+
+	itemCount := 0
 	for i, sc := range m.shortcuts {
-		if sb.Len() > height*20 {
+		if itemCount >= maxItems {
 			break
 		}
 
@@ -146,6 +153,7 @@ func (m *Model) renderShortcutsPanel(width int, height int) string {
 			sb.WriteString(line)
 		}
 		sb.WriteString("\n")
+		itemCount++
 	}
 
 	return sb.String()
@@ -170,8 +178,15 @@ func (m *Model) renderArtifactsPanel(width int, height int) string {
 		return sb.String()
 	}
 
+	// Show all artifacts (limit by available height)
+	maxItems := height - 3 // Leave space for header
+	if maxItems < 0 {
+		maxItems = 0
+	}
+
+	itemCount := 0
 	for i, art := range m.artifacts {
-		if sb.Len() > height*20 {
+		if itemCount >= maxItems {
 			break
 		}
 
@@ -180,10 +195,10 @@ func (m *Model) renderArtifactsPanel(width int, height int) string {
 			tag = tag[:width-11] + "..."
 		}
 
-		// Status indicator (3 chars wide)
-		status := "   "
+		// Status indicator: ○ unencrypted, ● encrypted
+		status := "○"
 		if art.Encrypted {
-			status = "[E]"
+			status = "●"
 		}
 
 		if i == m.selectedArtifact {
@@ -196,6 +211,7 @@ func (m *Model) renderArtifactsPanel(width int, height int) string {
 			sb.WriteString(line)
 		}
 		sb.WriteString("\n")
+		itemCount++
 	}
 
 	return sb.String()
