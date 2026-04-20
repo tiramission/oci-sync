@@ -46,8 +46,12 @@ func (m *Model) renderFullScreen() string {
 
 	var output strings.Builder
 
-	// Calculate dimensions
-	leftWidth := 28
+	// Calculate dimensions using ratios (4:6)
+	shortcutsRatio := 0.4
+	leftWidth := int(float64(m.width) * shortcutsRatio)
+	if leftWidth < 30 {
+		leftWidth = 30
+	}
 	rightWidth := m.width - leftWidth - 3
 	topHeight := (m.height - 5) / 2
 	bottomHeight := m.height - 5 - topHeight - 1
@@ -127,7 +131,8 @@ func (m *Model) renderShortcutsPanel(width int, height int) string {
 	}
 
 	// Show all shortcuts (limit by available height)
-	maxItems := height - 3 // Leave space for header
+	linesPerItem := 2
+	maxItems := (height - 3) / linesPerItem
 	if maxItems < 0 {
 		maxItems = 0
 	}
@@ -144,15 +149,20 @@ func (m *Model) renderShortcutsPanel(width int, height int) string {
 		}
 
 		if i == m.selectedShortcut {
-			line := styleCursor.
-				Width(width).
-				Render(fmt.Sprintf("❯ %s", name))
-			sb.WriteString(line)
+			sb.WriteString(styleCursor.Width(width).Render(fmt.Sprintf("❯ %s", name)))
 		} else {
-			line := styleText.Render(fmt.Sprintf("  %s", name))
-			sb.WriteString(line)
+			sb.WriteString(styleText.Width(width).Render(fmt.Sprintf("  %s", name)))
 		}
 		sb.WriteString("\n")
+
+		// Repo line (indented, muted)
+		repo := sc.Repo
+		if len(repo) > width-6 {
+			repo = repo[:width-9] + "..."
+		}
+		sb.WriteString(styleMuted.Width(width).Render(fmt.Sprintf("    %s", repo)))
+		sb.WriteString("\n")
+
 		itemCount++
 	}
 
@@ -179,7 +189,8 @@ func (m *Model) renderArtifactsPanel(width int, height int) string {
 	}
 
 	// Show all artifacts (limit by available height)
-	maxItems := height - 3 // Leave space for header
+	linesPerItem := 2
+	maxItems := (height - 3) / linesPerItem
 	if maxItems < 0 {
 		maxItems = 0
 	}
@@ -191,8 +202,9 @@ func (m *Model) renderArtifactsPanel(width int, height int) string {
 		}
 
 		tag := art.Tag
-		if len(tag) > width-8 {
-			tag = tag[:width-11] + "..."
+		maxTagLen := width - 15
+		if len(tag) > maxTagLen {
+			tag = tag[:maxTagLen-3] + "..."
 		}
 
 		// Status indicator: ○ unencrypted, ● encrypted
@@ -202,15 +214,23 @@ func (m *Model) renderArtifactsPanel(width int, height int) string {
 		}
 
 		if i == m.selectedArtifact {
-			line := styleCursor.
-				Width(width).
-				Render(fmt.Sprintf("❯ %s %s", status, tag))
-			sb.WriteString(line)
+			sb.WriteString(styleCursor.Width(width).Render(fmt.Sprintf("❯ %s %s", status, tag)))
 		} else {
-			line := styleText.Render(fmt.Sprintf("  %s %s", status, tag))
-			sb.WriteString(line)
+			sb.WriteString(styleText.Width(width).Render(fmt.Sprintf("  %s %s", status, tag)))
 		}
 		sb.WriteString("\n")
+
+		// Info line: version + size (muted)
+		info := art.Version
+		if art.Size > 0 {
+			info = fmt.Sprintf("%s • %s", art.Version, formatSize(art.Size))
+		}
+		if len(info) > width-6 {
+			info = info[:width-9] + "..."
+		}
+		sb.WriteString(styleMuted.Width(width).Render(fmt.Sprintf("    %s", info)))
+		sb.WriteString("\n")
+
 		itemCount++
 	}
 

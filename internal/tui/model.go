@@ -122,6 +122,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		// Tab: cycle through shortcuts
+		if msg.String() == "tab" {
+			if len(m.shortcuts) > 0 {
+				m.selectedShortcut = (m.selectedShortcut + 1) % len(m.shortcuts)
+				m.selectedArtifact = 0
+				m.artifacts = nil
+				return m, m.loadArtifacts()
+			}
+		}
+
 		// Handle screen-specific keys
 		switch m.screen {
 		case ScreenShortcuts:
