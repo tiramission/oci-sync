@@ -63,7 +63,7 @@ func runList(ctx context.Context, repoPath string, format string, filterLabels [
 						break
 					}
 				} else {
-					if v, ok := a.Labels[parts[0]]; !ok || v == "" {
+					if _, ok := a.Labels[parts[0]]; !ok {
 						match = false
 						break
 					}
