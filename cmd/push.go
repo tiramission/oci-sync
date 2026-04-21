@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/log/v2"
 	"github.com/spf13/cobra"
 	"github.com/tiramission/oci-sync/internal/archive"
+	"github.com/tiramission/oci-sync/internal/cache"
 	"github.com/tiramission/oci-sync/internal/crypto"
 	"github.com/tiramission/oci-sync/internal/oci"
 )
@@ -70,5 +72,14 @@ func runPush(ctx context.Context, localPath, remotePath, passphrase string, labe
 	}
 
 	log.Info("Push successful ✓", "ref", remotePath)
+
+	cache.AddActivity(cache.Activity{
+		Type:      cache.ActivityPush,
+		Timestamp: time.Now(),
+		RemoteRef: remotePath,
+		LocalPath: localPath,
+		Success:   true,
+	})
+
 	return nil
 }

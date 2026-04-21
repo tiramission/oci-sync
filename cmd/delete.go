@@ -3,9 +3,11 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"charm.land/log/v2"
 	"github.com/spf13/cobra"
+	"github.com/tiramission/oci-sync/internal/cache"
 	"github.com/tiramission/oci-sync/internal/oci"
 )
 
@@ -35,5 +37,13 @@ func runDelete(ctx context.Context, remotePath string) error {
 		return fmt.Errorf("delete failed: %w", err)
 	}
 	log.Info("Delete successful ✓", "ref", remotePath)
+
+	cache.AddActivity(cache.Activity{
+		Type:      cache.ActivityDelete,
+		Timestamp: time.Now(),
+		RemoteRef: remotePath,
+		Success:   true,
+	})
+
 	return nil
 }

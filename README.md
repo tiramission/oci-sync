@@ -178,6 +178,25 @@ oci-sync alias add x --repo registry.example.com/myteam/files
 oci-sync alias remove x
 ```
 
+### recent — 查看活动历史
+
+查看 push/pull/delete/label 等操作的历史记录（存储在本地 cache）。
+
+```bash
+# 查看最近活动（默认 20 条）
+oci-sync recent
+
+# 指定数量
+oci-sync recent --limit 10
+
+# 指定格式
+oci-sync recent --format json
+oci-sync recent --format yaml
+
+# 清空历史记录
+oci-sync recent --clear
+```
+
 ### tui — 交互式终端界面
 
 启动全屏交互式 TUI 来管理 shortcuts 和 artifacts：
@@ -248,7 +267,7 @@ auths:
     password: mytoken
 
 experiments:
-  tui: false  # 启用实验性 TUI 功能
+  tui: false  # 启用实验性 TUI 功能（也可通过 OCI_SYNC_TUI=1 环境变量开启）
 ```
 
 可用配置项：
@@ -258,7 +277,7 @@ experiments:
 | `shortcuts.<name>.repo` | - | 动态命令的默认仓库地址 |
 | `auths.<registry>.username` | - | 该仓库的认证用户名 |
 | `auths.<registry>.password` | - | 该仓库的认证密码或令牌 |
-| `experiments.tui` | `false` | 启用实验性 TUI 功能 |
+| `experiments.tui` | `false` | 启用实验性 TUI 功能（也可通过 `OCI_SYNC_TUI=1` 环境变量开启） |
 
 认证优先级：**配置文件 `auths` > Docker credential store**
 

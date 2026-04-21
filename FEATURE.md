@@ -14,6 +14,7 @@
 - `oci-sync alias list`：列出所有配置的 shortcuts。
 - `oci-sync alias add`：添加新的 shortcut。
 - `oci-sync alias remove`：删除 shortcut。
+- `oci-sync recent`：查看活动历史记录。
 - `oci-sync tui`：启动交互式 TUI 进行 artifacts 管理。
 - `oci-sync <name> push`：快捷推送命令，通过 `shortcuts.<name>.repo` 配置仓库，仅用 `--tag` 指定远程标签，支持 `--label`。
 - `oci-sync <name> pull`：快捷拉取命令，通过 `shortcuts.<name>.repo` 配置仓库，仅用 `--tag` 指定远程标签。
@@ -102,7 +103,27 @@ oci-sync alias add <name> --repo <registry>/<repository>
 oci-sync alias remove <name>
 ```
 
-7. shortcut commands
+7. recent
+
+```bash
+# 查看最近活动（默认 20 条）
+oci-sync recent
+
+# 指定数量
+oci-sync recent --limit 10
+
+# 指定格式
+oci-sync recent --format json
+oci-sync recent --format yaml
+
+# 清空历史记录
+oci-sync recent --clear
+```
+
+- activity cache 存储在 `~/.cache/oci-sync/activity.json`（支持 `XDG_CACHE_HOME`）
+- 记录 push/pull/delete/label 等操作的时间、远程引用、本地路径、标签、操作结果
+
+8. shortcut commands
 
 shortcut 命令依赖配置文件中的 `shortcuts.<name>.repo`：
 

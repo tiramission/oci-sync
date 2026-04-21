@@ -7,6 +7,7 @@ import (
 	"charm.land/log/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/tiramission/oci-sync/internal/cache"
 	"github.com/tiramission/oci-sync/internal/config"
 	"github.com/tiramission/oci-sync/internal/version"
 )
@@ -43,6 +44,9 @@ func init() {
 	// Initialize configuration
 	config.InitConfig()
 
+	// Initialize activity cache
+	cache.InitCache()
+
 	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "Omit informational output")
 
 	rootCmd.AddCommand(newPushCmd())
@@ -51,6 +55,7 @@ func init() {
 	rootCmd.AddCommand(newListCmd())
 	rootCmd.AddCommand(newLabelCmd())
 	rootCmd.AddCommand(newAliasCmd())
+	rootCmd.AddCommand(newRecentCmd())
 
 	// Add TUI only if experimental feature is enabled
 	if config.IsTUIEnabled() {

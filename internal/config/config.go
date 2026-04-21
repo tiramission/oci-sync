@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tiramission/oci-sync/internal/xdg"
 	"gopkg.in/yaml.v3"
 )
 
@@ -37,7 +38,7 @@ var globalConfig *Config
 func InitConfig() error {
 	paths := []string{
 		".",
-		filepath.Join(os.Getenv("HOME"), ".config", "oci-sync"),
+		filepath.Join(xdg.ConfigDir(), "oci-sync"),
 	}
 
 	for _, dir := range paths {
@@ -60,7 +61,7 @@ func InitConfig() error {
 func ConfigFileUsed() string {
 	paths := []string{
 		".",
-		filepath.Join(os.Getenv("HOME"), ".config", "oci-sync"),
+		filepath.Join(xdg.ConfigDir(), "oci-sync"),
 	}
 
 	for _, dir := range paths {
@@ -81,6 +82,9 @@ func GetRegistryAuth(host string) (RegistryAuth, bool) {
 }
 
 func IsTUIEnabled() bool {
+	if envEnabled := os.Getenv("OCI_SYNC_TUI"); envEnabled == "1" || envEnabled == "true" || envEnabled == "yes" {
+		return true
+	}
 	if globalConfig == nil {
 		return false
 	}

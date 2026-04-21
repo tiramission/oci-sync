@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/log/v2"
 	"github.com/spf13/cobra"
+	"github.com/tiramission/oci-sync/internal/cache"
 	"github.com/tiramission/oci-sync/internal/oci"
 )
 
@@ -26,12 +28,12 @@ func newLabelSetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set [flags]",
 		Short: "Set or update labels on an OCI artifact",
-		Long: `Set or update one or more labels on an existing OCI artifact.
+		Long: `Set or update labels on an existing OCI artifact.
 Labels are stored in the manifest annotations.
 
 Examples:
-  oci-sync label set myrepo:latest key1=value1 key2=value2
-  oci-sync label set registry.example.com/myrepo:latest app=myapp version=1.0`,
+  oci-sync label set --remote myrepo:latest key1=value1 key2=value2
+  oci-sync label set --remote registry.example.com/myrepo:latest app=myapp version=1.0`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLabelSet(cmd.Context(), remote, args)
 		},
@@ -58,6 +60,20 @@ func runLabelSet(ctx context.Context, remote string, labels []string) error {
 	}
 
 	log.Info("Labels updated ✓", "ref", remote)
+
+	labelStrs := make([]string, 0, len(updates))
+	for k, v := range updates {
+		labelStrs = append(labelStrs, k+"="+v)
+	}
+
+	cache.AddActivity(cache.Activity{
+		Type:      cache.ActivityLabel,
+		Timestamp: time.Now(),
+		RemoteRef: remote,
+		Labels:    labelStrs,
+		Success:   true,
+	})
+
 	return nil
 }
 
@@ -67,11 +83,11 @@ func newLabelUnsetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "unset [flags]",
 		Short: "Remove labels from an OCI artifact",
-		Long: `Remove one or more labels from an existing OCI artifact.
+		Long: `Remove labels from an existing OCI artifact.
 
 Examples:
-  oci-sync label unset myrepo:latest key1 key2
-  oci-sync label unset registry.example.com/myrepo:latest app version`,
+  oci-sync label unset --remote myrepo:latest key1 key2
+  oci-sync label unset --remote registry.example.com/myrepo:latest app version`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLabelUnset(cmd.Context(), remote, args)
 		},
@@ -93,5 +109,14 @@ func runLabelUnset(ctx context.Context, remote string, keys []string) error {
 	}
 
 	log.Info("Labels removed ✓", "ref", remote)
+
+	cache.AddActivity(cache.Activity{
+		Type:      cache.ActivityLabel,
+		Timestamp: time.Now(),
+		RemoteRef: remote,
+		Labels:    keys,
+		Success:   true,
+	})
+
 	return nil
 }
