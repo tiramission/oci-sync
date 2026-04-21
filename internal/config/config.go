@@ -132,7 +132,7 @@ type ShortcutInfo struct {
 
 func GetAllShortcuts() []ShortcutInfo {
 	if globalConfig == nil || globalConfig.Shortcuts == nil {
-		return nil
+		return []ShortcutInfo{}
 	}
 	infos := make([]ShortcutInfo, 0, len(globalConfig.Shortcuts))
 	for name, shortcut := range globalConfig.Shortcuts {
