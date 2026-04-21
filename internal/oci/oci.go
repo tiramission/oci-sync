@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"strings"
 
 	"github.com/opencontainers/go-digest"
@@ -56,9 +57,7 @@ func Push(ctx context.Context, data []byte, ref string, encrypted bool, labels m
 	} else {
 		annotations[AnnotationEncrypted] = "false"
 	}
-	for k, v := range labels {
-		annotations[k] = v
-	}
+	maps.Copy(annotations, labels)
 
 	configBytes := emptyConfigBytes()
 	configDesc := ocispec.Descriptor{
@@ -249,9 +248,7 @@ func UpdateAnnotations(ctx context.Context, ref string, updates map[string]strin
 		manifest.Annotations = make(map[string]string)
 	}
 
-	for k, v := range updates {
-		manifest.Annotations[k] = v
-	}
+	maps.Copy(manifest.Annotations, updates)
 	for _, k := range removeKeys {
 		delete(manifest.Annotations, k)
 	}

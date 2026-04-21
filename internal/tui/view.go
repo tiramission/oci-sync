@@ -48,10 +48,7 @@ func (m *Model) renderFullScreen() string {
 
 	// Calculate dimensions using ratios (4:6)
 	shortcutsRatio := 0.4
-	leftWidth := int(float64(m.width) * shortcutsRatio)
-	if leftWidth < 30 {
-		leftWidth = 30
-	}
+	leftWidth := max(int(float64(m.width)*shortcutsRatio), 30)
 	rightWidth := m.width - leftWidth - 3
 	topHeight := (m.height - 5) / 2
 	bottomHeight := m.height - 5 - topHeight - 1
@@ -147,10 +144,7 @@ func (m *Model) renderShortcutsPanel(width int, height int) string {
 
 	// Show all shortcuts (limit by available height)
 	linesPerItem := 2
-	maxItems := (height - 3) / linesPerItem
-	if maxItems < 0 {
-		maxItems = 0
-	}
+	maxItems := max((height-3)/linesPerItem, 0)
 
 	itemCount := 0
 	for i, sc := range m.shortcuts {
@@ -205,10 +199,7 @@ func (m *Model) renderArtifactsPanel(width int, height int) string {
 
 	// Show all artifacts (limit by available height)
 	linesPerItem := 2
-	maxItems := (height - 3) / linesPerItem
-	if maxItems < 0 {
-		maxItems = 0
-	}
+	maxItems := max((height-3)/linesPerItem, 0)
 
 	itemCount := 0
 	for i, art := range m.artifacts {
@@ -344,13 +335,6 @@ func truncateString(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func formatSize(bytes int64) string {

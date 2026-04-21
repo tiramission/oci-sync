@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pterm/pterm"
@@ -127,14 +128,14 @@ func joinLabels(labels []string) string {
 		return "-"
 	}
 	if len(labels) <= 2 {
-		result := ""
+		var result strings.Builder
 		for i, l := range labels {
 			if i > 0 {
-				result += ", "
+				result.WriteString(", ")
 			}
-			result += l
+			result.WriteString(l)
 		}
-		return result
+		return result.String()
 	}
 	return fmt.Sprintf("%s, %s... +%d", labels[0], labels[1], len(labels)-2)
 }
