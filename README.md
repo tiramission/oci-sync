@@ -246,6 +246,9 @@ auths:
   registry.example.com:
     username: myuser
     password: mytoken
+
+experiments:
+  tui: false  # 启用实验性 TUI 功能
 ```
 
 可用配置项：
@@ -255,6 +258,7 @@ auths:
 | `shortcuts.<name>.repo` | - | 动态命令的默认仓库地址 |
 | `auths.<registry>.username` | - | 该仓库的认证用户名 |
 | `auths.<registry>.password` | - | 该仓库的认证密码或令牌 |
+| `experiments.tui` | `false` | 启用实验性 TUI 功能 |
 
 认证优先级：**配置文件 `auths` > Docker credential store**
 

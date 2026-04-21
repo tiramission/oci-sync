@@ -51,7 +51,11 @@ func init() {
 	rootCmd.AddCommand(newListCmd())
 	rootCmd.AddCommand(newLabelCmd())
 	rootCmd.AddCommand(newAliasCmd())
-	rootCmd.AddCommand(newTuiCmd())
+
+	// Add TUI only if experimental feature is enabled
+	if config.IsTUIEnabled() {
+		rootCmd.AddCommand(newTuiCmd())
+	}
 
 	// Add dynamic shortcut commands
 	for _, name := range config.ShortcutNames() {
