@@ -60,8 +60,12 @@ func (m *Model) renderFullScreen() string {
 	leftContent := m.renderShortcutsPanel(leftWidth-3, topHeight-3)
 	rightContent := m.renderArtifactsPanel(rightWidth-3, topHeight-3)
 
-	leftPanel := m.styledPanel(leftContent, leftWidth, topHeight, "SHORTCUTS")
-	rightPanel := m.styledPanel(rightContent, rightWidth, topHeight, "ARTIFACTS")
+	// Determine focused panel
+	shortcutsFocused := m.screen == ScreenShortcuts
+	artifactsFocused := m.screen == ScreenArtifacts || m.screen == ScreenDetail
+
+	leftPanel := m.styledPanel(leftContent, leftWidth, topHeight, "SHORTCUTS", shortcutsFocused)
+	rightPanel := m.styledPanel(rightContent, rightWidth, topHeight, "ARTIFACTS", artifactsFocused)
 
 	// Combine top panels horizontally
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
@@ -70,7 +74,7 @@ func (m *Model) renderFullScreen() string {
 
 	// Bottom section: details full width
 	detailContent := m.renderDetailsPanel(m.width-3, bottomHeight-3)
-	detailPanel := m.styledPanel(detailContent, m.width, bottomHeight, "DETAILS")
+	detailPanel := m.styledPanel(detailContent, m.width, bottomHeight, "DETAILS", false)
 	output.WriteString(detailPanel)
 	output.WriteString("\n")
 
@@ -96,10 +100,21 @@ func (m *Model) renderSizeWarning() string {
 }
 
 // Create styled panel with title
-func (m *Model) styledPanel(content string, width int, height int, title string) string {
-	// Title bar
-	titleBar := fmt.Sprintf("  %s", strings.ToUpper(title))
-	titleLine := styleHeader.
+func (m *Model) styledPanel(content string, width int, height int, title string, focused bool) string {
+	// Title bar with focus indicator
+	var titleBar string
+	if focused {
+		titleBar = fmt.Sprintf("  » %s", strings.ToUpper(title))
+	} else {
+		titleBar = fmt.Sprintf("    %s", strings.ToUpper(title))
+	}
+
+	titleStyle := styleHeader
+	if !focused {
+		titleStyle = styleMuted
+	}
+
+	titleLine := titleStyle.
 		Width(width - 2).
 		Render(titleBar)
 
@@ -300,28 +315,22 @@ func (m *Model) renderDetailsPanel(width int, height int) string {
 	return sb.String()
 }
 
-// Footer
+// Footer with simple single-line style
 func (m *Model) renderFooter(width int) string {
-	left := " OCI-Sync"
-	var right string
+	var keys string
 
 	if m.modal != nil {
-		right = "ESC Cancel • Enter Confirm "
+		keys = "ESC Cancel | Enter Confirm"
 	} else {
-		right = "↑↓ Select • Enter View • u Upload • d Download • x Delete • q Quit "
-	}
-
-	padding := width - len(left) - len(right) - 2
-	if padding < 0 {
-		padding = 0
-		right = "q Quit"
+		keys = "Tab Switch | ↑↓ Nav | Enter View | u Upload | d Download | x Delete | q Quit"
 	}
 
 	footer := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(colorBg)).
 		Background(lipgloss.Color(colorAccent)).
 		Width(width).
-		Render(left + strings.Repeat(" ", padding) + right)
+		Align(lipgloss.Center).
+		Render(" OCI-Sync  " + keys)
 
 	return footer
 }

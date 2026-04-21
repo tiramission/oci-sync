@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -95,7 +96,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				keep := m.modal.HandleInput(msg)
 				if !keep {
 					m.modal = nil
-				} else if m.modal.Download.step > 1 {
+				} else if m.modal.Download.step >= 1 {
 					// Submit download
 					m.loading = true
 					m.loadingMsg = "Downloading artifact..."
@@ -145,6 +146,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ShortcutsLoadedMsg:
 		m.shortcuts = msg.shortcuts
 		m.loading = false
+		// Auto-load artifacts for first shortcut if available
+		if len(m.shortcuts) > 0 {
+			return m, m.loadArtifacts()
+		}
 		return m, nil
 
 	case ArtifactsLoadedMsg:
@@ -180,14 +185,27 @@ func (m *Model) View() string {
 
 	// Check if showing modal
 	if m.modal != nil {
-		mainView := m.renderFullScreen()
 		modalView := m.modal.Render(m.width, m.height)
-		return lipgloss.JoinVertical(
-			lipgloss.Center,
-			mainView,
-			"\n",
-			modalView,
-		)
+
+		// Create centered modal overlay
+		modalBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color(colorAccent)).
+			Background(lipgloss.Color(colorBg)).
+			Padding(1, 2).
+			Width(m.width - 20).
+			Align(lipgloss.Center).
+			Render(modalView)
+
+		// Center modal vertically and horizontally
+		centered := lipgloss.NewStyle().
+			Width(m.width).
+			Height(m.height).
+			Align(lipgloss.Center).
+			AlignVertical(lipgloss.Center).
+			Render(modalBox)
+
+		return centered
 	}
 
 	return m.renderFullScreen()
@@ -281,12 +299,15 @@ func (m *Model) performDownload() tea.Cmd {
 			return ErrorMsg{msg: "Invalid modal state", err: fmt.Errorf("no download modal")}
 		}
 
-		err := m.PullArtifact(m.modal.Download.targetPath, m.modal.Download.passphrase)
+		targetPath := m.modal.Download.targetPath
+		passphrase := m.modal.Download.passphrase
+
+		err := m.PullArtifact(targetPath, passphrase)
 		if err != nil {
 			return ErrorMsg{msg: fmt.Sprintf("Download failed: %v", err), err: err}
 		}
 
-		return SuccessMsg{msg: "Download successful"}
+		return SuccessMsg{msg: fmt.Sprintf("Downloaded to: %s", targetPath)}
 	}
 }
 
@@ -324,6 +345,10 @@ func (m *Model) loadArtifactsForRefresh() tea.Msg {
 func (m *Model) loadShortcuts() tea.Cmd {
 	return func() tea.Msg {
 		shortcuts := config.GetAllShortcuts()
+		// Sort by ASCII order
+		sort.Slice(shortcuts, func(i, j int) bool {
+			return shortcuts[i].Name < shortcuts[j].Name
+		})
 		return ShortcutsLoadedMsg{shortcuts: shortcuts}
 	}
 }
