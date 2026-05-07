@@ -197,43 +197,23 @@ oci-sync recent --format yaml
 oci-sync recent --clear
 ```
 
-### tui — 交互式终端界面
+### gui — 图形界面管理器
 
-启动全屏交互式 TUI 来管理 shortcuts 和 artifacts：
+启动图形界面来管理 shortcuts 和 artifacts：
 
 ```bash
-oci-sync tui
+oci-sync gui
 ```
 
 **功能特性**
 
 - 📋 **浏览 Shortcuts**：选择并浏览所有配置的 shortcuts
 - 📦 **查看 Artifacts**：列出每个 shortcut 仓库中的所有 artifacts，显示加密状态和标签
-- 🔍 **详细信息**：查看每个 artifact 的完整信息（摘要、加密状态、版本、标签等）
-- 📤 **上传**：交互式分步上传（输入路径→指定标签→可选加密）
-- ⬇️ **下载**：交互式分步下载（选择目标位置→输入密码，自动解密）
+- 🔍 **详细信息**：查看每个 artifact 的完整信息（摘要、加密状态、版本等）
+- 📤 **上传**：上传本地文件或目录到仓库
+- ⬇️ **下载**：下载 artifacts 到本地目录
 - 🗑️ **删除**：删除 artifacts（带确认提示）
 - 🔄 **刷新**：实时更新 artifacts 列表
-
-**快捷键**
-
-| 快捷键 | 功能 | 场景 |
-|------|------|------|
-| `↑/↓` 或 `k/j` | 导航 | 所有列表 |
-| `Enter` | 进入/选择 | 列表、表单 |
-| `u` | 上传 | Artifacts 列表 |
-| `d` | 下载 | Artifacts 列表 |
-| `x` | 删除 | Artifacts 列表 |
-| `enter` | 查看/提交 | Artifacts 列表、表单 |
-| `Esc` | 取消 | 模态对话框 |
-| `y/n` | 确认/取消 | 确认对话框 |
-| `b` | 返回 | Artifacts/详情 |
-| `r` | 刷新 | Artifacts 列表 |
-| `q` | 退出 | 全局 |
-
-**密码输入**
-
-上传/下载时的密码输入会自动屏蔽显示（`•`），确保隐私安全。
 
 ### 参数说明
 
@@ -265,9 +245,6 @@ auths:
   registry.example.com:
     username: myuser
     password: mytoken
-
-experiments:
-  tui: false  # 启用实验性 TUI 功能（也可通过 OCI_SYNC_TUI=1 环境变量开启）
 ```
 
 可用配置项：
@@ -277,7 +254,6 @@ experiments:
 | `shortcuts.<name>.repo` | - | 动态命令的默认仓库地址 |
 | `auths.<registry>.username` | - | 该仓库的认证用户名 |
 | `auths.<registry>.password` | - | 该仓库的认证密码或令牌 |
-| `experiments.tui` | `false` | 启用实验性 TUI 功能（也可通过 `OCI_SYNC_TUI=1` 环境变量开启） |
 
 认证优先级：**配置文件 `auths` > Docker credential store**
 

@@ -52,19 +52,6 @@ in {
             default = {};
             description = "Per-registry authentication credentials";
           };
-          experiments = lib.mkOption {
-            type = lib.types.submodule {
-              options = {
-                tui = lib.mkOption {
-                  type = lib.types.bool;
-                  default = false;
-                  description = "Enable experimental TUI feature";
-                };
-              };
-            };
-            default = {};
-            description = "Experimental feature flags";
-          };
         };
       };
       default = {};

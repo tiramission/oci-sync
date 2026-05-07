@@ -133,7 +133,7 @@ oci-sync/
 │   ├── label.go                   # label 子命令 (set/unset)
 │   ├── alias.go                   # alias 子命令 (list/add/remove)
 │   ├── recent.go                  # recent 子命令（查看活动历史）
-│   ├── tui.go                     # tui 子命令（交互式）
+│   ├── gui.go                     # gui 子命令（图形界面）
 │   └── utils.go                   # 工具函数（formatBytes）
 └── internal/
     ├── config/
@@ -150,10 +150,9 @@ oci-sync/
     │   └── cache.go               # Activity cache 持久化
     ├── xdg/
     │   └── xdg.go                 # XDG 目录规范支持
-    ├── tui/
-    │   ├── manager.go             # TUI 主管理器
-    │   ├── operations.go          # OCI 操作包装
-    │   └── run.go                 # 启动入口
+    ├── gui/
+    │   ├── gui.go                 # GUI 主界面
+    │   └── operations.go          # OCI 操作包装
 ```
 
 ---
@@ -397,9 +396,6 @@ auths:
   <registry2.example.com>:
     username: <username>
     password: <password>
-
-experiments:
-  tui: false  # 启用实验性 TUI 功能（也可通过 OCI_SYNC_TUI=1 环境变量开启）
 ```
 
 **配置说明：**
@@ -409,7 +405,6 @@ experiments:
 | `shortcuts.<name>.repo` | - | 动态命令的默认仓库地址 |
 | `auths.<registry>.username` | - | 该仓库的认证用户名 |
 | `auths.<registry>.password` | - | 该仓库的认证密码或令牌 |
-| `experiments.tui` | `false` | 启用实验性 TUI 功能（也可通过 `OCI_SYNC_TUI=1` 环境变量开启） |
 
 **认证优先级：** 配置文件 `auths` > Docker credential store
 
@@ -491,58 +486,56 @@ oci-sync recent --clear
 
 **存储位置**：`~/.cache/oci-sync/activity.json`（支持 `XDG_CACHE_HOME` 环境变量）
 
-### tui
+### gui
 
 ```bash
-oci-sync tui
+oci-sync gui
 ```
 
-启动交互式 TUI 进行 artifacts 管理。无需任何命令行参数。
+启动图形界面进行 artifacts 管理。无需任何命令行参数。
 
 ---
 
-## 8. TUI 模块设计
+## 8. GUI 模块设计
 
-### 8.1 `internal/tui` — 交互式终端界面
+### 8.1 `internal/gui` — 图形用户界面
 
-TUI 使用 `github.com/charmbracelet/huh` 和 `github.com/charmbracelet/lipgloss` 库实现。
+GUI 使用 `github.com/gogpu/ui` 库实现，提供跨平台的图形界面。
 
 | 类型 | 位置 | 说明 |
 |------|------|------|
-| `Manager` | `manager.go` | TUI 主管理器，处理状态和用户交互 |
-| `Operations` | `operations.go` | OCI 操作函数包装器（Push/Pull/Delete） |
-| `Run()` | `run.go` | 启动 TUI 的入口点 |
+| `guiState` | `gui.go` | GUI 主状态管理，处理用户交互 |
+| `operations` | `operations.go` | OCI 操作函数包装器（Push/Pull/Delete） |
 
 **主要功能**
 
 1. **shortcuts 浏览**：显示所有配置的 shortcuts，支持选择
 2. **artifacts 管理**：
    - 列表查看：显示每个 shortcut 下的所有 artifacts
-   - 上传：交互式输入本地路径、标签、密码等
+   - 上传：输入本地路径、标签、密码等
    - 下载：选择 artifact 并指定下载路径
    - 删除：确认删除指定 artifact
-   - 详情查看：显示 artifact 的加密状态、标签等信息
-   - 标签编辑：修改 artifact 的标签（计划中）
+   - 详情查看：显示 artifact 的加密状态、版本等信息
 
 **用户交互流程**
 
 ```
-启动 TUI
+启动 GUI
   ↓
 选择 Shortcut
   ↓
-浏览 Artifacts (列表/上传/下载/删除/查看详情/编辑标签)
+浏览 Artifacts (列表/上传/下载/删除/查看详情)
   ↓
-返回或退出
+退出
 ```
 
 **实现特点**
 
-- 使用表单式交互，友好直观
-- 敏感信息（密码）自动屏蔽
+- 使用 Material Design 3 主题
+- 响应式布局，支持窗口缩放
+- 对话框式交互，友好直观
 - 自动加密/解密 artifacts
-- 错误和成功信息实时显示
-- 支持刷新 artifacts 列表
+- 后台异步操作，不阻塞界面
 
 ---
 

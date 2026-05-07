@@ -23,14 +23,9 @@ type Shortcut struct {
 	Repo string `yaml:"repo"`
 }
 
-type Experiments struct {
-	TUI bool `yaml:"tui"`
-}
-
 type Config struct {
-	Auths       map[string]RegistryAuth `yaml:"auths"`
-	Shortcuts   map[string]Shortcut     `yaml:"shortcuts"`
-	Experiments Experiments             `yaml:"experiments"`
+	Auths     map[string]RegistryAuth `yaml:"auths"`
+	Shortcuts map[string]Shortcut     `yaml:"shortcuts"`
 }
 
 var globalConfig *Config
@@ -79,16 +74,6 @@ func GetRegistryAuth(host string) (RegistryAuth, bool) {
 	}
 	auth, ok := globalConfig.Auths[host]
 	return auth, ok
-}
-
-func IsTUIEnabled() bool {
-	if envEnabled := os.Getenv("OCI_SYNC_TUI"); envEnabled == "1" || envEnabled == "true" || envEnabled == "yes" {
-		return true
-	}
-	if globalConfig == nil {
-		return false
-	}
-	return globalConfig.Experiments.TUI
 }
 
 func GetShortcutRepo(name string) (string, error) {

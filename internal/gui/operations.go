@@ -1,4 +1,4 @@
-package tui
+package gui
 
 import (
 	"fmt"
@@ -12,16 +12,15 @@ import (
 	"github.com/tiramission/oci-sync/internal/oci"
 )
 
-// PushArtifact performs a push operation
-func (m *Model) PushArtifact(localPath, tag, passphrase string) error {
-	if m.selectedShortcut >= len(m.shortcuts) {
-		return fmt.Errorf("invalid shortcut")
+func (s *guiState) pushArtifact(localPath, tag, passphrase string) error {
+	if s.selectedShortcut < 0 || s.selectedShortcut >= len(s.shortcuts) {
+		return fmt.Errorf("no shortcut selected")
 	}
 
-	shortcut := m.shortcuts[m.selectedShortcut]
+	shortcut := s.shortcuts[s.selectedShortcut]
 	repo, err := config.GetShortcutRepo(shortcut.Name)
 	if err != nil {
-		return err
+		return fmt.Errorf("get repo: %w", err)
 	}
 
 	// Validate local path
@@ -49,7 +48,7 @@ func (m *Model) PushArtifact(localPath, tag, passphrase string) error {
 	// Push to OCI
 	remoteRef := repo + ":" + tag
 	log.Info("Pushing to registry...", "ref", remoteRef)
-	if err := oci.Push(m.ctx, data, remoteRef, encrypted, nil); err != nil {
+	if err := oci.Push(s.ctx, data, remoteRef, encrypted, nil); err != nil {
 		return fmt.Errorf("push failed: %w", err)
 	}
 
@@ -57,23 +56,26 @@ func (m *Model) PushArtifact(localPath, tag, passphrase string) error {
 	return nil
 }
 
-// PullArtifact performs a pull operation
-func (m *Model) PullArtifact(downloadPath, passphrase string) error {
-	if m.selectedShortcut >= len(m.shortcuts) || m.selectedArtifact >= len(m.artifacts) {
-		return fmt.Errorf("invalid selection")
+func (s *guiState) pullArtifact(downloadPath, passphrase string) error {
+	if s.selectedShortcut < 0 || s.selectedShortcut >= len(s.shortcuts) {
+		return fmt.Errorf("no shortcut selected")
 	}
 
-	shortcut := m.shortcuts[m.selectedShortcut]
-	artifact := m.artifacts[m.selectedArtifact]
+	if s.selectedArtifact < 0 || s.selectedArtifact >= len(s.artifacts) {
+		return fmt.Errorf("no artifact selected")
+	}
+
+	shortcut := s.shortcuts[s.selectedShortcut]
+	artifact := s.artifacts[s.selectedArtifact]
 
 	repo, err := config.GetShortcutRepo(shortcut.Name)
 	if err != nil {
-		return err
+		return fmt.Errorf("get repo: %w", err)
 	}
 
 	remoteRef := repo + ":" + artifact.Tag
 	log.Info("Checking encryption status...", "ref", remoteRef)
-	encrypted, err := oci.IsEncrypted(m.ctx, remoteRef)
+	encrypted, err := oci.IsEncrypted(s.ctx, remoteRef)
 	if err != nil {
 		return fmt.Errorf("check encrypted failed: %w", err)
 	}
@@ -83,7 +85,7 @@ func (m *Model) PullArtifact(downloadPath, passphrase string) error {
 	}
 
 	log.Info("Pulling from registry...", "ref", remoteRef)
-	result, err := oci.Pull(m.ctx, remoteRef)
+	result, err := oci.Pull(s.ctx, remoteRef)
 	if err != nil {
 		return fmt.Errorf("pull failed: %w", err)
 	}
@@ -115,23 +117,26 @@ func (m *Model) PullArtifact(downloadPath, passphrase string) error {
 	return nil
 }
 
-// DeleteArtifact performs a delete operation
-func (m *Model) DeleteArtifact() error {
-	if m.selectedShortcut >= len(m.shortcuts) || m.selectedArtifact >= len(m.artifacts) {
-		return fmt.Errorf("invalid selection")
+func (s *guiState) deleteArtifact() error {
+	if s.selectedShortcut < 0 || s.selectedShortcut >= len(s.shortcuts) {
+		return fmt.Errorf("no shortcut selected")
 	}
 
-	shortcut := m.shortcuts[m.selectedShortcut]
-	artifact := m.artifacts[m.selectedArtifact]
+	if s.selectedArtifact < 0 || s.selectedArtifact >= len(s.artifacts) {
+		return fmt.Errorf("no artifact selected")
+	}
+
+	shortcut := s.shortcuts[s.selectedShortcut]
+	artifact := s.artifacts[s.selectedArtifact]
 
 	repo, err := config.GetShortcutRepo(shortcut.Name)
 	if err != nil {
-		return err
+		return fmt.Errorf("get repo: %w", err)
 	}
 
 	remoteRef := repo + ":" + artifact.Tag
 	log.Info("Deleting artifact...", "ref", remoteRef)
-	if err := oci.Delete(m.ctx, remoteRef); err != nil {
+	if err := oci.Delete(s.ctx, remoteRef); err != nil {
 		return fmt.Errorf("delete failed: %w", err)
 	}
 
