@@ -21,8 +21,8 @@
       system: let
         pkgs = nixpkgs.legacyPackages.${system};
       in {
-        packages.default = pkgs.callPackage ./nix/package.nix { inherit pkgs; };
-        devShells.default = pkgs.callPackage ./nix/dev-shell.nix { inherit pkgs; };
+        packages.default = pkgs.callPackage ./nix/package.nix {inherit pkgs;};
+        devShells.default = pkgs.callPackage ./nix/dev-shell.nix {inherit pkgs;};
       }
     );
 }

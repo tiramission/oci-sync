@@ -1,13 +1,13 @@
-{ pkgs }:
-
+{pkgs}:
 pkgs.buildGoModule {
   pname = "oci-sync";
   version = "0.1.0-dev";
   src = ../.;
 
-  vendorHash = "sha256-8NywncUVQAR/a/c5eB1WNQ1P9XQEMbyYPLjgIjqL+YQ=";
+  vendorHash = "sha256-jD8v1jmMBZ4lGTDIx17L943tMWYZO6rv8Mrl13YfVEk=";
 
   nativeBuildInputs = [pkgs.installShellFiles];
+  env.CGO_ENABLED = 0;
 
   postInstall = ''
     installShellCompletion --cmd oci-sync \
