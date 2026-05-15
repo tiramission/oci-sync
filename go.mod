@@ -4,9 +4,6 @@ go 1.25.8
 
 require (
 	charm.land/log/v2 v2.0.0
-	github.com/gogpu/gg v0.45.1
-	github.com/gogpu/gogpu v0.32.0
-	github.com/gogpu/ui v0.1.18
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/pterm/pterm v0.12.83
@@ -31,16 +28,8 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/containerd/console v1.0.5 // indirect
-	github.com/coregx/signals v0.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
-	github.com/go-text/typesetting v0.3.4 // indirect
-	github.com/go-webgpu/goffi v0.5.0 // indirect
-	github.com/go-webgpu/webgpu v0.4.3 // indirect
-	github.com/gogpu/gpucontext v0.17.0 // indirect
-	github.com/gogpu/gputypes v0.5.0 // indirect
-	github.com/gogpu/naga v0.17.11 // indirect
-	github.com/gogpu/wgpu v0.27.0 // indirect
 	github.com/gookit/color v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
@@ -53,7 +42,6 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
-	golang.org/x/image v0.39.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/term v0.41.0 // indirect

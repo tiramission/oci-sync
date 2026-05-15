@@ -197,24 +197,6 @@ oci-sync recent --format yaml
 oci-sync recent --clear
 ```
 
-### gui — 图形界面管理器
-
-启动图形界面来管理 shortcuts 和 artifacts：
-
-```bash
-oci-sync gui
-```
-
-**功能特性**
-
-- 📋 **浏览 Shortcuts**：选择并浏览所有配置的 shortcuts
-- 📦 **查看 Artifacts**：列出每个 shortcut 仓库中的所有 artifacts，显示加密状态和标签
-- 🔍 **详细信息**：查看每个 artifact 的完整信息（摘要、加密状态、版本等）
-- 📤 **上传**：上传本地文件或目录到仓库
-- ⬇️ **下载**：下载 artifacts 到本地目录
-- 🗑️ **删除**：删除 artifacts（带确认提示）
-- 🔄 **刷新**：实时更新 artifacts 列表
-
 ### 参数说明
 
 | 参数 | 说明 |
