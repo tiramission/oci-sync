@@ -131,15 +131,19 @@ oci-sync recent --clear
 oci-sync tui
 ```
 
-- **分栏设计**：左侧为 shortcuts 列表，右侧为对应的 artifacts (tags) 表格，下方实时展示所选 artifact 的详细元数据（如 Full Name, Digest, Version, Size, Encryption, Labels 等）。
-- **键盘操作**：
-  - `Tab` / `左右方向键` / `h/l`：在 Shortcuts 与 Artifacts 栏之间切换焦点
-  - `Up/Down` / `j/k`：在聚焦栏内导航选择
-  - `Enter` (在 Shortcuts 栏)：加载对应快捷库的 tags
+- **分栏设计**：顶部单行 Header（应用名、当前仓库、tag 计数 / 过滤 `n/m`、加载 spinner）；左侧 shortcuts 栏、右侧 artifacts (tags) 表格（`TAG`/`SIZE`/`ENC`/`VER`），底部按上下文生成的快捷键提示栏。所选 artifact 的详细元数据（Full Name, Digest, Version, Size, Encryption, Labels）通过 `Enter` 详情弹窗查看，而非固定占用一行。
+- **响应式降级**：终端宽度 `<76` 列时折叠为单栏（仅渲染聚焦面板）；低于 `48×12` 时显示 `terminal too small — need at least 48×12`，不渲染错乱布局。
+- **异步与进度**：`oci.List`/`Pull`/`Delete` 均在 Bubble Tea Cmd 协程中执行，不阻塞渲染；拉取时弹窗实时显示阶段（解析 manifest / 下载 / 解密 / 解包）与字节级下载进度条（百分比 + 已下载/总大小，八分之一子块精度），spinner tick 驱动重绘；加载中或执行中按 `Esc` 取消（`Ctrl+C` 取消并退出），过期的列表结果按序号丢弃。切换 shortcut 会清空旧 artifacts，避免展示陈旧列表。
+- **键盘操作**（`j`=下、`k`=上，遵循 vim 约定）：
+  - `Tab` / `shift+Tab` / `1` / `2`：在 Shortcuts 与 Artifacts 栏之间切换焦点
+  - `↑/k` `↓/j` / `g` / `G`：栏内导航、跳顶、跳底
+  - `Enter` (在 Shortcuts 栏)：加载对应快捷库的 tags；(在 Artifacts 栏)：打开详情
   - `p` (在 Artifacts 栏)：拉取所选的 tag 到本地，弹窗输入本地路径和密码
-  - `d` (在 Artifacts 栏)：从远程仓库删除所选 tag，弹窗确认
+  - `d` (在 Artifacts 栏)：从远程仓库删除所选 tag，弹窗确认（默认 No）
   - `r` (在 Artifacts 栏)：手动重新加载当前 tag 列表
-  - `Esc`：关闭弹窗或退回左侧边栏
+  - `/`：按 tag 过滤（smart-case）
+  - `Esc`：取消进行中的操作，否则关闭弹窗或退回左侧边栏
+  - `?`：打开/关闭帮助
   - `q` / `Ctrl+C`：退出工具
 
 9. shortcut commands

@@ -122,7 +122,10 @@ func IsEncrypted(ctx context.Context, ref string) (bool, error) {
 	return manifest.Annotations[AnnotationEncrypted] == "true", nil
 }
 
-func Pull(ctx context.Context, ref string) (*PullResult, error) {
+// Pull fetches the artifact layer for ref. When onRead is non-nil it is
+// called after every read chunk with the cumulative downloaded bytes and the
+// total layer size, enabling progress reporting.
+func Pull(ctx context.Context, ref string, onRead func(done, total int64)) (*PullResult, error) {
 	repo, err := newRepository(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -149,16 +152,33 @@ func Pull(ctx context.Context, ref string) (*PullResult, error) {
 	}
 	defer rc.Close()
 
-	layerBytes, err := io.ReadAll(rc)
-	if err != nil {
+	var buf bytes.Buffer
+	pw := &progressWriter{w: &buf, total: layerDesc.Size, on: onRead}
+	if _, err := io.Copy(pw, rc); err != nil {
 		return nil, fmt.Errorf("read layer: %w", err)
 	}
 
 	encrypted := manifest.Annotations[AnnotationEncrypted] == "true"
 	return &PullResult{
-		Data:      layerBytes,
+		Data:      buf.Bytes(),
 		Encrypted: encrypted,
 	}, nil
+}
+
+type progressWriter struct {
+	w     io.Writer
+	total int64
+	done  int64
+	on    func(done, total int64)
+}
+
+func (p *progressWriter) Write(b []byte) (int, error) {
+	n, err := p.w.Write(b)
+	p.done += int64(n)
+	if p.on != nil {
+		p.on(p.done, p.total)
+	}
+	return n, err
 }
 
 func newRepository(ctx context.Context, ref string) (*remote.Repository, error) {

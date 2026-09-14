@@ -133,7 +133,7 @@ func runShortcutPull(ctx context.Context, name, tag, localPath, passphrase strin
 	if err != nil {
 		return err
 	}
-	return runPull(ctx, remotePath, localPath, passphrase)
+	return runPull(ctx, remotePath, localPath, passphrase, nil)
 }
 
 func runShortcutList(ctx context.Context, name, format string, labels []string) error {

@@ -206,8 +206,9 @@ oci-sync recent --clear
 oci-sync tui
 ```
 
-- **分栏结构**：左侧展示 shortcuts 列表，右侧展示该仓库下的 tags/artifacts 列表，下方实时更新展示选中 artifact 的详细元数据（包括 Full Name、Digest、Version、Size、Encryption 状态和 Labels）。
-- **极简操作**：支持 Tab/左右方向键在分栏间切换，使用 `p` 键拉取/解密（弹窗输入本地路径与密码），使用 `d` 键删除（弹窗确认），使用 `r` 键刷新 tags。
+- **分栏结构**：左侧 shortcuts 列表、右侧仓库 tags/artifacts 表格，顶部单行显示当前仓库与计数，底部按上下文显示快捷键提示；选中 artifact 按 `Enter` 查看完整元数据（Full Name、Digest、Version、Size、Encryption 状态和 Labels）。窄终端（<76 列）自动折叠为单栏。
+- **拉取进度**：pull 弹窗实时显示下载进度条（百分比 + 已下载/总大小）与当前阶段（解析 / 下载 / 解密 / 解包），进行中可随时 `Esc` 取消。
+- **极简操作**：`Tab`/`1`/`2` 切换分栏焦点，`↑↓` 或 `k`/`j` 导航，`Enter` 加载/查看详情，`/` 过滤 tags，`p` 拉取/解密（弹窗输入本地路径与密码），`d` 删除（弹窗确认，默认取消），`r` 刷新，`?` 查看全部快捷键，`Esc` 取消进行中的操作或逐级返回。
 
 
 ### 参数说明

@@ -26,7 +26,7 @@ and unpack to a local directory.
 remote format: <registry>/<repository>:<tag>
 Example: registry-1.docker.io/myuser/myrepo:latest`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPull(cmd.Context(), remote, local, passphrase)
+			return runPull(cmd.Context(), remote, local, passphrase, nil)
 		},
 	}
 
@@ -38,10 +38,26 @@ Example: registry-1.docker.io/myuser/myrepo:latest`,
 	return cmd
 }
 
-func runPull(ctx context.Context, remotePath, localPath, passphrase string) error {
+// PullStage describes the current stage of a pull operation. For the
+// download phase, Done/Total carry byte counts; other phases are
+// indeterminate (Total == 0).
+type PullStage struct {
+	Phase string // "check", "download", "decrypt", "unpack"
+	Done  int64
+	Total int64
+}
+
+func runPull(ctx context.Context, remotePath, localPath, passphrase string, onProgress func(PullStage)) error {
+	report := func(s PullStage) {
+		if onProgress != nil {
+			onProgress(s)
+		}
+	}
+
 	log.Info("Pulling from registry...", "ref", remotePath)
 
 	// Check encryption status before downloading the full content
+	report(PullStage{Phase: "check"})
 	encrypted, err := oci.IsEncrypted(ctx, remotePath)
 	if err != nil {
 		return fmt.Errorf("failed to check encryption status: %w", err)
@@ -54,7 +70,10 @@ func runPull(ctx context.Context, remotePath, localPath, passphrase string) erro
 		log.Warn("content is not encrypted, ignoring --passphrase flag")
 	}
 
-	result, err := oci.Pull(ctx, remotePath)
+	report(PullStage{Phase: "download"})
+	result, err := oci.Pull(ctx, remotePath, func(done, total int64) {
+		report(PullStage{Phase: "download", Done: done, Total: total})
+	})
 	if err != nil {
 		return fmt.Errorf("pull failed: %w", err)
 	}
@@ -64,6 +83,7 @@ func runPull(ctx context.Context, remotePath, localPath, passphrase string) erro
 
 	if result.Encrypted {
 		log.Info("Decrypting...")
+		report(PullStage{Phase: "decrypt", Total: int64(len(data))})
 		data, err = crypto.Decrypt(data, passphrase)
 		if err != nil {
 			return fmt.Errorf("decryption failed: %w", err)
@@ -77,6 +97,7 @@ func runPull(ctx context.Context, remotePath, localPath, passphrase string) erro
 	}
 
 	log.Info("Unpacking files...", "dest", localPath)
+	report(PullStage{Phase: "unpack"})
 	if err := archive.Unpack(data, localPath); err != nil {
 		return fmt.Errorf("unpack failed: %w", err)
 	}

@@ -106,9 +106,10 @@ CLI 参数传入 → 读取 ~/.cache/oci-sync/activity.json
 
 **数据流（tui）**
 ```
-CLI 启动 → 启动全屏分栏交互界面 (Tab 切换 Focus，p 拉取，d 删除，r 刷新)
-        → [oci.List] 获取快捷方式下的镜像 tag 列表并更新右侧面板
-        → [oci.Pull] 或 [oci.Delete] 执行本地拉取或远程删除，并以居中弹窗展示执行状态
+CLI 启动 → 全屏分栏交互界面（焦点模型：Shortcuts / Artifacts 二选一；<76 列折叠为单栏）
+        → Enter 加载所选 shortcut 仓库 → [oci.List]（Cmd 协程异步执行，Esc 可取消，过期结果按 seq 丢弃）
+        → p 拉取 / d 删除 → 输入路径（加密再输密码）/ 确认弹窗（默认 No）
+        → [oci.Pull] 或 [oci.Delete]（Cmd 协程执行，Esc 取消），拉取实时显示下载进度条（字节/百分比/子块精度）与阶段（check/download/decrypt/unpack），结束后以结果弹窗展示并可重试
 ```
 
 **数据流（activity recording）**
@@ -204,7 +205,7 @@ random nonce ──────────────────────�
 |------|------|------|
 | `Push` | `(ctx, data []byte, ref string, encrypted bool, labels map[string]string) error` | 推送 artifact（支持 labels） |
 | `IsEncrypted` | `(ctx, ref string) (bool, error)` | 检查加密状态（仅拉取 manifest） |
-| `Pull` | `(ctx, ref string) (*PullResult, error)` | 拉取 artifact |
+| `Pull` | `(ctx, ref string, onRead func(done, total int64)) (*PullResult, error)` | 拉取 artifact；`onRead` 按下载块回报字节进度（可为 nil） |
 | `Delete` | `(ctx, ref string) error` | 删除远程 artifact |
 | `List` | `(ctx, ref string) ([]ArtifactInfo, error)` | 列出远程仓库镜像记录（支持 Registry/Repo）|
 | `UpdateAnnotations` | `(ctx, ref string, updates map[string]string, removeKeys []string) error` | 更新 manifest annotations（set/unset labels）|
@@ -501,20 +502,25 @@ oci-sync tui
 ```
 
 **界面分区**：
-- **Shortcuts (左侧边栏)**：展示配置的 shortcuts，可按 Tab 或左右方向键切换聚焦，使用 Up/Down 导航，Enter 键加载对应仓库下的 artifacts。
-- **Artifacts (右侧主栏)**：显示当前 shortcut 下 of tags 列表（包含 `TAG`、`SIZE`、`ENCRYPTED`、`VERSION`），宽度自适应调整。
-- **Details & Status (下方详情栏)**：实时显示当前选中 artifact 的 Full Name、Digest、Version、Size、Encryption 状态以及 Labels。
-- **弹窗 Dialog (居中浮动)**：路径输入、密码提示、删除确认及执行状态将以双线框浮动弹窗的形式居中显示。
+- **Header（顶部一行）**：应用名、当前/待定仓库路径，右对齐显示 tag 计数或 `n/m`（过滤时）以及加载 spinner。
+- **Shortcuts（左侧边栏）**：配置的 shortcuts，`▸` 标记当前项，反白表示焦点所在行。终端宽度 `<76` 时与其它面板折叠为单栏。
+- **Artifacts（右侧主栏）**：当前 shortcut 的 tag 表格（`TAG`、`SIZE`、`ENC`、`VER`）。数字右对齐，超宽截断并加省略号，宽度不足时自动隐藏 `VER` 列。
+- **Footer（底部提示栏）**：按当前焦点/模态上下文自动生成 3–5 条快捷键提示（来自 `bubbles/help`）。
+- **详情视图（enter）**：宽表格的兜底手段——在 artifact 上按 enter 弹出居中详情，展示 Full Name、Digest、Version、Size、Encryption、Labels（键排序）。
+- **模态弹窗（居中单框）**：路径输入、密码提示、删除确认（默认 No）、执行结果、`?` 帮助，均以单层圆角框呈现。
+
+**响应式下限**：`terminal too small — need at least 48×12`，低于此不渲染花屏。
 
 **快捷键**：
-- `Tab` / `左右方向键` / `h/l`：在 Shortcuts 与 Artifacts 栏之间切换焦点
-- `Up/Down` / `j/k`：在当前聚焦的栏内导航
-- `Enter` (在 Shortcuts 栏)：加载选中的仓库
-- `p` (在 Artifacts 栏)：拉取选中的 artifact
-- `d` (在 Artifacts 栏)：删除选中的 artifact
-- `r` (在 Artifacts 栏)：重新加载当前 tag 列表
-- `Esc`：关闭输入弹窗或将焦点退回到左侧 Shortcuts 栏
-- `q` / `Ctrl+C`：退出工具
+- `Tab` / `shift+Tab` / `1` / `2`：在 Shortcuts 与 Artifacts 栏之间切换焦点
+- `↑/k` `↓/j` / `g` / `G`：栏内导航、跳顶、跳底（`j`=下、`k`=上，符合 vim 约定）
+- `Enter`（Shortcuts 栏）：加载选中仓库；（Artifacts 栏）：打开详情
+- `p`：拉取所选 artifact（弹窗输入路径，加密再输密码）
+- `d`：删除所选 artifact（默认 No 的确认弹窗）
+- `r`：重新加载当前 tag 列表
+- `/`：按 tag 过滤（smart-case：小写不区分大小写，含大写则区分）
+- `Esc`：加载/拉取/删除进行中取消操作，否则关闭弹窗或退回 Shortcuts 栏
+- `?`：打开/关闭帮助；`q` / `Ctrl+C`：退出
 
 ---
 
