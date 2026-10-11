@@ -22,6 +22,18 @@ jobs:
           go-version-file: 'go.mod'
           cache-dependency-path: go.sum
 
+      - name: Verify before packaging
+        run: |
+          # A tag is the one push nobody reviews, so the checks that normally
+          # live in CI have to run here or not at all. mygo vet is the only
+          # thing that catches a native UI build value outliving its frame,
+          # and the TUI tests are run under both locale widths because the
+          # layout answers differently depending on which one is set.
+          go vet ./...
+          go tool mygo vet .
+          RUNEWIDTH_EASTASIAN=0 go test -count=1 ./...
+          RUNEWIDTH_EASTASIAN=1 go test -count=1 ./...
+
       - name: Determine version
         id: version
         run: |
@@ -31,15 +43,32 @@ jobs:
 
       - name: Build binaries
         run: |
-          TAG=${{ steps.version.outputs.version }}
+          # steps.version.outputs.version is the tag with the leading v
+          # already stripped, so the binary reports "0.8.0" rather than
+          # "v0.8.0". That string is also written into the io.oci-sync.version
+          # annotation, so the prefix would follow the artifact into every
+          # registry it is pushed to. Overwriting it with TAG here undid the
+          # strip step and shipped the prefix in eight releases.
+          VERSION=${{ steps.version.outputs.version }}
           for OS in linux darwin windows; do
             for ARCH in amd64 arm64; do
               EXT=""
               if [ "$OS" = "windows" ]; then EXT=".exe"; fi
               OUTPUT="oci-sync-${OS}-${ARCH}${EXT}"
-              GOOS=$OS GOARCH=$ARCH go build -ldflags "-X github.com/tiramission/oci-sync/internal/version.Version=${TAG}" -o "$OUTPUT" .
+              GOOS=$OS GOARCH=$ARCH go build -ldflags "-X github.com/tiramission/oci-sync/internal/version.Version=${VERSION}" -o "$OUTPUT" .
             done
           done
+
+      - name: Check the version the binary reports
+        run: |
+          # The build is the only place the ldflags path gets exercised, so a
+          # mistyped -X would otherwise ship as a release nobody notices until
+          # a registry compares annotations.
+          got=$(./oci-sync-linux-amd64 --version | awk '{print $NF}')
+          if [ "$got" != "${{ steps.version.outputs.version }}" ]; then
+            echo "binary reports $got, expected ${{ steps.version.outputs.version }}" >&2
+            exit 1
+          fi
 
       - name: Determine if prerelease
         id: prerelease
