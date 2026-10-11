@@ -1,7 +1,7 @@
 {pkgs}:
 pkgs.mkShell {
   buildInputs = with pkgs; [
-    go
+    go_1_27
     gopls
     go-tools
     gotools
