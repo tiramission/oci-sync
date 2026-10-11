@@ -50,6 +50,8 @@ const (
 	stateDetail
 	stateResult
 	stateHelp
+	statePush
+	stateEditLabels
 )
 
 type opKind int
@@ -58,7 +60,9 @@ const (
 	opNone opKind = iota
 	opFetch
 	opPull
+	opPush
 	opDelete
+	opLabel
 )
 
 // Messages returned by async commands.
@@ -71,7 +75,90 @@ type fetchArtifactsMsg struct {
 
 type pullResultMsg struct{ err error }
 
+type pushResultMsg struct {
+	ref, local string
+	err        error
+}
+
+type labelResultMsg struct{ err error }
+
 type deleteResultMsg struct{ err error }
+
+// pushField is one row of the push form. Only the focused row is backed by a
+// live textinput; the rest are plain strings, so tabbing between them never
+// depends on several inputs fighting over cursor state.
+type pushField struct {
+	label string
+	value string
+	// echo is false for the passphrase row so the secret never reaches the
+	// screen once the field loses focus.
+	echo bool
+}
+
+const (
+	pushFieldSource = iota
+	pushFieldTag
+	pushFieldPassphrase
+	pushFieldLabels
+	pushFieldCount
+)
+
+// pushForm holds the push dialog state. Its scope is the repository, not a
+// row, so it stays available with nothing selected in the artifacts table.
+type pushForm struct {
+	fields [pushFieldCount]pushField
+	focus  int
+	err    string
+}
+
+func newPushForm() pushForm {
+	return pushForm{fields: [pushFieldCount]pushField{
+		{label: "source", echo: true},
+		{label: "tag", echo: true},
+		{label: "passphrase", echo: false},
+		{label: "labels", echo: true},
+	}}
+}
+
+func (f pushForm) passphrase() string {
+	if f.fields[pushFieldPassphrase].value == "" {
+		return ""
+	}
+	return f.fields[pushFieldPassphrase].value
+}
+
+// validate reports why the form cannot be submitted yet, or "" when it can.
+// Every field is checked at once rather than one per attempt, so the dialog
+// can show the complete list of what is missing instead of revealing it one
+// submit at a time.
+func (f pushForm) validate() string {
+	if strings.TrimSpace(f.fields[pushFieldSource].value) == "" {
+		return "source path is required"
+	}
+	tag := strings.TrimSpace(f.fields[pushFieldTag].value)
+	if tag == "" {
+		return "tag is required"
+	}
+	if strings.ContainsAny(tag, " \t") {
+		return "tag must not contain whitespace"
+	}
+	// Strict mode: a malformed label is a typo the user wants to see, not a
+	// pair to drop silently.
+	if _, err := parseLabels(splitLabels(f.fields[pushFieldLabels].value), true); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// splitLabels turns the comma-or-space separated labels field into the
+// repeated-flag shape parseLabels expects. An empty field yields no labels
+// rather than one empty pair.
+func splitLabels(s string) []string {
+	f := strings.FieldsFunc(s, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n'
+	})
+	return f
+}
 
 // Semantic color tokens. Values are plain ANSI-16 so the user's terminal
 // theme stays authoritative. Meaning is always paired with text, never
@@ -85,6 +172,7 @@ var (
 	colMuted  = lipgloss.Color("8") // chrome, metadata
 
 	stApp        = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
+	stAccent     = lipgloss.NewStyle().Foreground(colAccent)
 	stDim        = lipgloss.NewStyle().Foreground(colMuted)
 	stHeading    = lipgloss.NewStyle().Bold(true)
 	stCursor     = lipgloss.NewStyle().Reverse(true).Bold(true)
@@ -138,6 +226,9 @@ type model struct {
 	confirmYes bool
 	destPath   string
 	input      textinput.Model
+
+	push      pushForm
+	editLabel string // label editor buffer, `key=value` pairs or plain keys
 
 	shortcuts   []config.ShortcutInfo
 	shortcutIdx int
@@ -251,6 +342,14 @@ type geometry struct {
 	tagW     int
 	showVer  bool
 	verW     int
+}
+
+// focusedPane reports which pane owns the keyboard right now: the sidebar
+// when focusPanes is false, the artifact table when it is true. While a
+// form or a dialog is up neither pane does — the overlay took the keyboard —
+// so neither is drawn as focused.
+func (m model) focusedPane() bool {
+	return m.state == stateBrowse
 }
 
 func (m model) geo() geometry {
@@ -411,6 +510,66 @@ func (m *model) startDelete(tag string) tea.Cmd {
 	}
 }
 
+// startPush writes the local path to the current shortcut's repository.
+// Like the pull path it goes through runPush, so the activity history entry
+// comes from the command rather than being recorded a second time here.
+func (m *model) startPush(local, tag, passphrase string, labels []string) tea.Cmd {
+	shortcut := m.selectedShortcut().Name
+	ctx, cancel := context.WithCancel(m.baseCtx)
+	m.opCancel = cancel
+	m.op = opPush
+	m.opStart = time.Now()
+	m.opTarget = shortcut + ":" + tag
+	m.destPath = local
+	return func() tea.Msg {
+		remote, err := buildShortcutRemoteRef(shortcut, tag)
+		if err != nil {
+			return pushResultMsg{err: fmt.Errorf("push failed: %w", err)}
+		}
+		err = runPush(ctx, local, remote, passphrase, labels)
+		return pushResultMsg{ref: remote, local: local, err: err}
+	}
+}
+
+// startLabel applies the editor buffer to the selected artifact. Entries
+// with '=' set or update a label, bare keys remove one, so a single field
+// covers both halves of the CLI's label set / label unset pair.
+func (m *model) startLabel(tag, spec string) tea.Cmd {
+	shortcut := m.selectedShortcut().Name
+	ctx, cancel := context.WithCancel(m.baseCtx)
+	m.opCancel = cancel
+	m.op = opLabel
+	m.opStart = time.Now()
+	m.opTarget = shortcut + ":" + tag
+	return func() tea.Msg {
+		remote, err := buildShortcutRemoteRef(shortcut, tag)
+		if err != nil {
+			return labelResultMsg{err: err}
+		}
+		var sets, unsets []string
+		for _, entry := range splitLabels(spec) {
+			if strings.Contains(entry, "=") {
+				sets = append(sets, entry)
+			} else {
+				unsets = append(unsets, entry)
+			}
+		}
+		// Set first, then unset: the CLI rejects an empty set, and removing
+		// a key that this same edit just added would be surprising.
+		if len(sets) > 0 {
+			if err := runLabelSet(ctx, remote, sets); err != nil {
+				return labelResultMsg{err: err}
+			}
+		}
+		if len(unsets) > 0 {
+			if err := runLabelUnset(ctx, remote, unsets); err != nil {
+				return labelResultMsg{err: err}
+			}
+		}
+		return labelResultMsg{err: nil}
+	}
+}
+
 func (m *model) cancelFetch() {
 	if m.fetchCancel != nil {
 		m.fetchCancel()
@@ -464,6 +623,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.op, m.opCancel = opNone, nil
 		return m.showResult(opPull, msg.err), nil
 
+	case pushResultMsg:
+		m.op, m.opCancel = opNone, nil
+		m.destPath = msg.local
+		return m.showResult(opPush, msg.err), nil
+
+	case labelResultMsg:
+		m.op, m.opCancel = opNone, nil
+		return m.showResult(opLabel, msg.err), nil
+
 	case deleteResultMsg:
 		m.op, m.opCancel = opNone, nil
 		return m.showResult(opDelete, msg.err), nil
@@ -513,16 +681,26 @@ func (m model) showResult(op opKind, err error) model {
 	m.lastOp = op
 	m.pullStage = nil
 	verb := "Pull"
-	if op == opDelete {
+	switch op {
+	case opDelete:
 		verb = "Delete"
+	case opPush:
+		verb = "Push"
+	case opLabel:
+		verb = "Label update"
 	}
 	switch {
 	case err == nil:
 		m.resultOK = true
 		m.resultTitle = verb + " complete"
-		if op == opDelete {
+		switch op {
+		case opDelete:
 			m.resultBody = m.opTarget + " was removed from the registry."
-		} else {
+		case opPush:
+			m.resultBody = m.opTarget + " was packed from " + m.destPath
+		case opLabel:
+			m.resultBody = "Labels on " + m.opTarget + " were updated."
+		default:
 			m.resultBody = m.opTarget + " was unpacked to " + m.destPath
 		}
 	case errors.Is(err, context.Canceled):
@@ -540,8 +718,9 @@ func (m model) showResult(op opKind, err error) model {
 func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := m.keys
 
-	// A pull/delete in flight owns the screen: only cancel is accepted.
-	if m.op == opPull || m.op == opDelete {
+	// A pull/push/delete/label run in flight owns the screen: only cancel
+	// is accepted.
+	if m.op == opPull || m.op == opPush || m.op == opDelete || m.op == opLabel {
 		switch msg.String() {
 		case "esc":
 			if m.opCancel != nil {
@@ -558,7 +737,7 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Text-entry states consume printable keys before any shortcut does.
 	switch m.state {
-	case stateFilter, stateInputPath, stateInputPassphrase:
+	case stateFilter, stateInputPath, stateInputPassphrase, statePush, stateEditLabels:
 		return m.updateText(msg)
 	}
 
@@ -585,6 +764,11 @@ func (m model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateText(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// The push dialog moves between its own fields with tab; there is no
+	// pane to switch to while a modal owns the screen.
+	if m.state == statePush {
+		return m.updatePushForm(msg)
+	}
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
@@ -600,6 +784,8 @@ func (m model) updateText(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.EchoMode = textinput.EchoNormal
 		case stateInputPath:
 			m.state = stateBrowse
+		case stateEditLabels:
+			m.state = stateBrowse
 		}
 		return m, nil
 	case msg.String() == "enter":
@@ -612,6 +798,67 @@ func (m model) updateText(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setFilter(m.input.Value())
 	}
 	return m, cmd
+}
+
+// updatePushForm drives the push dialog: tab and shift+tab move between
+// fields, enter submits. The focused field is the only one mirrored into the
+// text input, and its value is written back on every keystroke so the form
+// stays the single source of truth even if focus moves mid-edit.
+func (m model) updatePushForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.push.fields[m.push.focus].value = m.input.Value()
+	switch {
+	case key.Matches(msg, m.keys.Quit):
+		return m, tea.Quit
+	case msg.String() == "esc":
+		m.input.Blur()
+		m.state = stateBrowse
+		m.push.err = ""
+		return m, nil
+	case key.Matches(msg, m.keys.Tab), msg.String() == "down":
+		return m.focusPushField(m.push.focus + 1)
+	case key.Matches(msg, m.keys.BackTab), msg.String() == "up":
+		return m.focusPushField(m.push.focus - 1)
+	case msg.String() == "enter":
+		if err := m.push.validate(); err != "" {
+			m.push.err = err
+			return m, nil
+		}
+		m.push.err = ""
+		m.input.Blur()
+		m.state = stateBrowse
+		f := m.push
+		local := strings.TrimSpace(f.fields[pushFieldSource].value)
+		tag := strings.TrimSpace(f.fields[pushFieldTag].value)
+		labels := splitLabels(f.fields[pushFieldLabels].value)
+		return m, tea.Batch(m.startPush(local, tag, f.passphrase(), labels), m.spinner.Tick)
+	}
+
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	m.push.fields[m.push.focus].value = m.input.Value()
+	// Clear a stale error as soon as the user edits the offending field.
+	m.push.err = ""
+	return m, cmd
+}
+
+// focusPushField moves the cursor within the push dialog, saving the current
+// field first so an edit is never lost by tabbing away from it.
+func (m model) focusPushField(next int) (tea.Model, tea.Cmd) {
+	m.push.fields[m.push.focus].value = m.input.Value()
+	next = (next + pushFieldCount) % pushFieldCount
+	m.push.focus = next
+	f := m.push.fields[next]
+	m.input.SetValue(f.value)
+	// Every push row already has a visible label, so the placeholder would
+	// only add a second, dimmer copy of the same word.
+	m.input.Placeholder = ""
+	if f.echo {
+		m.input.EchoMode = textinput.EchoNormal
+	} else {
+		m.input.EchoMode = textinput.EchoPassword
+	}
+	m.push.err = ""
+	return m, m.input.Focus()
 }
 
 func (m model) submitText() (tea.Model, tea.Cmd) {
@@ -647,8 +894,33 @@ func (m model) submitText() (tea.Model, tea.Cmd) {
 		if a, ok := m.currentArtifact(); ok {
 			return m, tea.Batch(m.startPull(a.Tag, m.destPath, pass), m.spinner.Tick)
 		}
+	case stateEditLabels:
+		spec := strings.TrimSpace(m.input.Value())
+		m.input.Blur()
+		m.state = stateBrowse
+		if spec == "" {
+			break
+		}
+		if a, ok := m.currentArtifact(); ok {
+			return m, tea.Batch(m.startLabel(a.Tag, spec), m.spinner.Tick)
+		}
 	}
 	return m, nil
+}
+
+// openPushForm opens the push dialog with the source field focused. The tag
+// is prefilled with the current date so the common case needs one keystroke
+// less, and a passphrase is opt-in: leaving it empty pushes plaintext,
+// which is the normal case rather than a failure to configure.
+func (m model) openPushForm() (tea.Model, tea.Cmd) {
+	m.push = newPushForm()
+	m.push.fields[pushFieldTag].value = time.Now().Format("2006-01-02")
+	m.state = statePush
+	f := m.push.fields[0]
+	m.input.SetValue(f.value)
+	m.input.Placeholder = f.label
+	m.input.EchoMode = textinput.EchoNormal
+	return m, m.input.Focus()
 }
 
 func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -714,6 +986,19 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.SetValue("./" + a.Tag)
 			m.input.Placeholder = "destination directory"
 			m.state = stateInputPath
+			return m, m.input.Focus()
+		}
+	case key.Matches(msg, k.Push):
+		// Push targets the repository, so it stays available with no row
+		// selected — that asymmetry with pull and delete is the point of
+		// the action row.
+		return m.openPushForm()
+	case key.Matches(msg, k.Edit):
+		if _, ok := m.currentArtifact(); ok {
+			m.editLabel = ""
+			m.input.SetValue("")
+			m.input.Placeholder = "key=value to set, key alone to remove"
+			m.state = stateEditLabels
 			return m, m.input.Focus()
 		}
 	case key.Matches(msg, k.Delete):

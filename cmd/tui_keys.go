@@ -22,8 +22,10 @@ type keyMap struct {
 	Panel2  key.Binding
 	Refresh key.Binding
 	Filter  key.Binding
+	Push    key.Binding
 	Pull    key.Binding
 	Delete  key.Binding
+	Edit    key.Binding
 	Help    key.Binding
 	Yes     key.Binding
 	No      key.Binding
@@ -45,10 +47,16 @@ func newKeyMap() keyMap {
 		Panel2:  key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "artifacts")),
 		Refresh: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Filter:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
-		Pull:    key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pull")),
-		Delete:  key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
-		Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
-		Yes:     key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "yes")),
-		No:      key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "no")),
+		// Push is deliberately capital P while pull is lowercase p. The two
+		// verbs sit side by side in the footer, and sharing one key would
+		// make a muscle-memory slip on the most frequent action write to
+		// the registry instead of reading from it.
+		Push:   key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "push")),
+		Pull:   key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pull")),
+		Delete: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+		Edit:   key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "labels")),
+		Help:   key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+		Yes:    key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "yes")),
+		No:     key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "no")),
 	}
 }

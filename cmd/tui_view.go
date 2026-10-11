@@ -73,13 +73,21 @@ func (m model) viewPanes() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
 }
 
+// paneStyle draws one pane's frame.
+//
+// Focus is carried by the border's weight rather than its colour: the
+// focused pane gets a double rule, the other a single one. A terminal gives
+// us no half-pixel, and border weight is the cue that still reads at a
+// glance in the corner of the eye, where a hue change between two similar
+// violets does not. Colour still shifts with focus, but as reinforcement
+// rather than as the signal.
 func paneStyle(active bool, w, h int) lipgloss.Style {
-	fg := colMuted
+	fg, border := colMuted, lipgloss.RoundedBorder()
 	if active {
-		fg = colAccent
+		fg, border = colAccent, lipgloss.ThickBorder()
 	}
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(border).
 		BorderForeground(fg).
 		Width(w).
 		Height(h)
@@ -135,12 +143,14 @@ func (m model) viewArtifacts(g geometry) string {
 	case m.repo == "":
 		lines = append(lines, stDim.Render("No repository loaded."),
 			stDim.Render("Select a shortcut and press enter."))
-	case len(m.visible) == 0 && m.filterText != "":
+	case len(m.artifacts) == 0:
+		// An empty repository and an over-narrow filter are different
+		// problems: one needs a push, the other needs the filter cleared.
+		lines = append(lines, stDim.Render("This repository has no artifacts yet."),
+			stDim.Render("P pushes the first one."))
+	case len(m.visible) == 0:
 		lines = append(lines, stDim.Render(fmt.Sprintf("No tags match %q.", m.filterText)),
 			stDim.Render("esc clears the filter."))
-	case len(m.visible) == 0:
-		lines = append(lines, stDim.Render("No tags in this repository."),
-			stDim.Render("r refreshes."))
 	default:
 		header := stDim.Render("  " + padRight("TAG", g.tagW) + " " + padLeft("SIZE", sizeW) + " " + padRight("ENC", encW) +
 			map[bool]string{true: " " + padRight("VER", g.verW), false: ""}[g.showVer])
@@ -174,8 +184,10 @@ func (m model) viewArtifacts(g geometry) string {
 func (m model) viewFooter() string {
 	k := m.keys
 	switch m.state {
-	case stateFilter, stateInputPath, stateInputPassphrase:
+	case stateFilter, stateInputPath, stateInputPassphrase, stateEditLabels:
 		return stDim.Render("enter: submit   ·   esc: cancel")
+	case statePush:
+		return stDim.Render("tab: next field   ·   enter: push   ·   esc: cancel")
 	case stateConfirmDelete:
 		return stDim.Render("←/→: choose   ·   enter: confirm   ·   esc: cancel")
 	case stateDetail, stateResult:
@@ -183,29 +195,97 @@ func (m model) viewFooter() string {
 	case stateHelp:
 		return stDim.Render("esc: close help")
 	case stateBrowse:
-		if m.focusPanes {
-			return m.help.ShortHelpView([]key.Binding{
-				k.Up, k.Down, k.Enter, k.Pull, k.Delete, k.Filter, k.Refresh, k.Back, k.Help, k.Quit,
-			})
+		// The footer carries the keys a first-time user needs and no
+		// more: where the cursor moves, what opens it, and how to push,
+		// pull or delete. Filtering and reloading are on the key table
+		// (press ?) rather than here — at 80 columns there is room for
+		// one or the other, and a footer that has silently shed half its
+		// entries teaches nobody which key went missing.
+		//
+		// The bindings are added in the order they are worth keeping, so
+		// a narrow terminal loses the last ones and not the first.
+		all := []key.Binding{
+			k.Up, k.Down, k.Enter,
+			k.Push, k.Pull, k.Delete, k.Edit,
+			k.Filter, k.Refresh, k.Back, k.Help, k.Quit,
 		}
-		return m.help.ShortHelpView([]key.Binding{
-			k.Up, k.Down, k.Enter, k.Tab, k.Refresh, k.Help, k.Quit,
-		})
+		if !m.focusPanes {
+			// The sidebar has no row-scoped verbs to offer, so it spends
+			// the room on moving between panes instead.
+			all = []key.Binding{k.Up, k.Down, k.Enter, k.Tab, k.Refresh, k.Help, k.Quit}
+		}
+		return m.clampHelp(m.help.ShortHelpView(m.fitBindings(all)))
 	}
-	return m.help.ShortHelpView([]key.Binding{k.Quit})
+	return m.clampHelp(m.help.ShortHelpView([]key.Binding{k.Quit}))
+}
+
+// fitBindings drops bindings from the end until the help line fits, then
+// says so in a trailing marker.
+//
+// The marker is English and short on purpose. It is the one part of the
+// footer nobody presses — it points at the full key table behind "?" — so
+// it should cost as little width as possible, and measuring a CJK label to
+// decide whether it fits is a whole class of bug this does not need.
+// fitBindings drops bindings from the end until the help line fits whole,
+// then appends a marker pointing at the full key table.
+//
+// bubbles/help truncates by itself once the line passes help.Width and ends
+// it with an ellipsis, so the only honest test of "does this fit" is whether
+// the rendered help still contains every binding's description. Measuring
+// the returned string instead cannot tell a line that fits from one help
+// has already cut, and the marker would be appended to the tail of a
+// truncated line — visible in the output as a help entry with no key.
+//
+// The marker is English and short on purpose. It is the one part of the
+// footer nobody presses, so it should cost as little width as possible,
+// and measuring a CJK label to decide whether it fits is a class of bug
+// this does not need.
+func (m model) fitBindings(bs []key.Binding) []key.Binding {
+	marker := key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "more"))
+	for len(bs) > 0 {
+		withMarker := append(append([]key.Binding{}, bs...), marker)
+		if m.helpShowsAll(withMarker) {
+			return withMarker
+		}
+		bs = bs[:len(bs)-1]
+	}
+	return []key.Binding{marker}
+}
+
+// helpShowsAll reports whether help renders every binding's description,
+// which is false exactly when help had to cut the line short.
+func (m model) helpShowsAll(bs []key.Binding) bool {
+	rendered := m.help.ShortHelpView(bs)
+	for _, b := range bs {
+		if d := b.Help().Desc; d != "" && !strings.Contains(rendered, d) {
+			return false
+		}
+	}
+	return true
+}
+
+// clampHelp keeps the footer inside the window. bubbles/help renders whatever
+// bindings it is given without truncating, so on a narrow terminal the extra
+// row would otherwise be wider than the panes above it and lipgloss would
+// widen the whole screen to match.
+func (m model) clampHelp(s string) string {
+	limit := m.width - 2
+	if limit < 10 {
+		limit = 10
+	}
+	return truncate(s, limit)
 }
 
 func (m model) viewOverlay() string {
 	switch {
-	case m.op == opPull || m.op == opDelete:
-		var body string
-		if m.op == opDelete {
-			body = "Deleting " + m.opTarget + "…"
-		} else {
-			body = "Pulling " + m.opTarget + " to " + m.destPath + "\n\n" + m.pullProgressBody(30)
-		}
-		body += "\n\n" + stDim.Render("elapsed "+time.Since(m.opStart).Truncate(time.Second).String())
-		return m.overlay(stHeading.Render(m.spinner.View()+" working"), body, "esc: cancel", colWarn, modalWidth)
+	case m.op == opPull || m.op == opPush || m.op == opDelete || m.op == opLabel:
+		return m.viewBusy()
+
+	case m.state == statePush:
+		return m.viewPushForm()
+
+	case m.state == stateEditLabels:
+		return m.overlay(stHeading.Render("Labels"), m.editLabelsBody(), "enter: apply   ·   esc: cancel", colInfo, modalWidth)
 
 	case m.state == stateDetail:
 		a, ok := m.currentArtifact()
@@ -253,6 +333,115 @@ func (m model) viewOverlay() string {
 	return ""
 }
 
+// viewBusy covers every in-flight remote operation. The wording follows the
+// verb so the overlay always names what is happening; pull is the only one
+// with real byte progress, because it is the only one whose payload size is
+// known before the transfer starts.
+func (m model) viewBusy() string {
+	var body string
+	switch m.op {
+	case opDelete:
+		body = "Deleting " + m.opTarget + "…"
+	case opPush:
+		body = "Packing and pushing " + m.opTarget + "…"
+	case opLabel:
+		body = "Updating labels on " + m.opTarget + "…"
+	default:
+		body = "Pulling " + m.opTarget + " to " + m.destPath + "\n\n" + m.pullProgressBody(30)
+	}
+	body += "\n\n" + stDim.Render("elapsed "+time.Since(m.opStart).Truncate(time.Second).String())
+	return m.overlay(stHeading.Render(m.spinner.View()+" working"), body, "esc: cancel", colWarn, modalWidth)
+}
+
+// viewPushForm renders the push dialog. Each row is a label column and a
+// value column on one line: the label is padded to a fixed width and the
+// value truncated to what is left, so a long path can never push the layout
+// onto a second line or out of the box. The focused row carries the cursor.
+func (m model) viewPushForm() string {
+	const labelW = 14
+	inner := modalWidth - 8
+	valueW := inner - labelW
+
+	var rows []string
+	for i, f := range m.push.fields {
+		value := f.value
+		if !f.echo {
+			// A masked input still draws one dot per character, which leaks
+			// the length; every masked row gets the same fixed run instead.
+			value = maskSecret(f.value)
+		} else if i == m.push.focus {
+			// The focused row draws the live input, which owns the cursor;
+			// echoing the plain value too would render it twice.
+			value = m.input.View()
+		}
+		if i == m.push.focus && value == "" {
+			// A masked row has no input view to fall back on, so an empty
+			// focused field still needs a cursor to show it is editable.
+			value = stCursor.Render(" ")
+		}
+		label := padRight(f.label, labelW)
+		if i == m.push.focus {
+			// The focused row is the one with the cursor on it; marking it
+			// by prefixing the label keeps the marker out of the value
+			// column, where it would shift the text the user is editing.
+			label = stAccent.Render(padRight("▸ "+f.label, labelW))
+		} else {
+			label = stDim.Render(padRight("  "+f.label, labelW))
+		}
+		rows = append(rows, label+truncate(value, valueW-2))
+	}
+	// The input's own placeholder reads as content on the focused row, so a
+	// field still being filled in would otherwise look like it had a value.
+	if m.push.fields[m.push.focus].value == "" {
+		rows[m.push.focus] += stDim.Render(m.input.Placeholder)
+	}
+	body := strings.Join(rows, "\n") + "\n\n" +
+		stDim.Render("passphrase empty = push plaintext")
+
+	if m.push.err != "" {
+		body += "\n\n" + stErr.Render("✗ "+m.push.err)
+	}
+	return m.overlay(stHeading.Render("Push to "+m.repo), body,
+		"tab: next field   ·   enter: push   ·   esc: cancel", colInfo, modalWidth)
+}
+
+// maskSecret hides a passphrase that is not the focused field, so switching
+// tabs never leaves the secret on screen.
+func maskSecret(s string) string {
+	if s == "" {
+		return stDim.Render("(empty)")
+	}
+	return stDim.Render(strings.Repeat("•", 8))
+}
+
+func (m model) editLabelsBody() string {
+	a, ok := m.currentArtifact()
+	if !ok {
+		return ""
+	}
+	var lines []string
+	for _, k := range sortedLabelKeys(a.Labels) {
+		lines = append(lines, "  "+truncate(k+"="+a.Labels[k], modalWidth-16))
+	}
+	body := ""
+	if len(lines) == 0 {
+		body = stDim.Render("No custom labels on this artifact.\n\n")
+	} else {
+		body = stHeading.Render("current") + "\n" + strings.Join(lines, "\n") + "\n\n"
+	}
+	return body + "change:\n" + m.input.View() +
+		"\n\n" + stDim.Render("key=value sets a label, a bare key removes it")
+}
+
+func sortedLabelKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func (m model) detailBody(a oci.ArtifactInfo, w int) string {
 	label := func(s string) string { return stDim.Render(padRight(s, 10)) }
 	field := func(k, v string) string {
@@ -286,7 +475,7 @@ func (m model) helpBody() string {
 		{k.Up, k.Down, k.Top, k.Bottom},
 		{k.Tab, k.BackTab, k.Panel1, k.Panel2},
 		{k.Enter, k.Back, k.Filter, k.Refresh},
-		{k.Pull, k.Delete, k.Help, k.Quit},
+		{k.Push, k.Pull, k.Delete, k.Edit, k.Help, k.Quit},
 	})
 }
 

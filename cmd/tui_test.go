@@ -227,6 +227,8 @@ func TestRenderedLinesFitEverySupportedSize(t *testing.T) {
 				"result":    m.showResult(opPull, nil).View(),
 				"help":      press(t, m, keys("?")).View(),
 				"filtering": press(t, m, keys("/"), keys("v1")).View(),
+				"pushform":  press(t, m, keys("P")).View(),
+				"editing":   press(t, m, keys("e")).View(),
 			}
 			for name, view := range views {
 				if line := firstOverWideLine(view, size[0]); line != "" {
@@ -282,6 +284,189 @@ func TestRenderBarCellCount(t *testing.T) {
 	}
 	if full := renderBar(3, 3, 10); full != strings.Repeat("█", 10) {
 		t.Fatalf("completed bar must be full blocks, got %q", full)
+	}
+}
+
+// Focus is carried by the border's weight, not its colour: the focused pane
+// is drawn with a double rule. A terminal cannot do the design's half-pixel
+// border, and weight is the cue that survives a glance.
+func TestFocusedPaneIsDrawnWithADoubleRule(t *testing.T) {
+	m := withArtifacts(newTestModel())
+	m = press(t, m, tea.KeyMsg{Type: tea.KeyTab})
+
+	view := m.View()
+	if !strings.Contains(view, "┃") {
+		t.Fatalf("expected a double rule on the focused pane:\n%s", view)
+	}
+}
+
+// An overlay owns the keyboard, so neither pane may claim focus while it is
+// up — otherwise the frame behind a dialog advertises a focus the user does
+// not have.
+func TestNeitherPaneClaimsFocusUnderAnOverlay(t *testing.T) {
+	m := press(t, withArtifacts(newTestModel()), tea.KeyMsg{Type: tea.KeyTab}, keys("P"))
+
+	view := m.View()
+	if strings.Contains(view, "┃") || strings.Contains(view, "┏") {
+		t.Fatalf("no pane should be focused while the push form is open:\n%s", view)
+	}
+}
+
+// The footer lists the keys a first-time user needs. At 80 columns there is
+// not room for all of them, and a footer that silently shed half its entries
+// teaches nobody which key went missing — so it ends in a pointer to the
+// full table instead.
+func TestFooterPointsAtTheKeyTableWhenItHasToDropKeys(t *testing.T) {
+	m := newTestModel()
+	m.width = 60
+	m.help.Width = 56
+
+	view := m.View()
+	if !strings.Contains(view, "more") {
+		t.Fatalf("expected the footer to point at the key table:\n%s", view)
+	}
+}
+
+// A footer that fits keeps every binding and drops the pointer, so the
+// hint never appears on a window wide enough not to need it.
+func TestFooterOmitsThePointerWhenEverythingFits(t *testing.T) {
+	view := withArtifacts(newTestModel()).View()
+	if strings.Contains(view, "more") {
+		t.Fatalf("a 100 column footer should list every key:\n%s", view)
+	}
+}
+
+// Push and pull sit one keystroke apart and both act on the current
+// repository, so binding them to the same key would make a muscle-memory
+// slip write to the registry instead of reading from it.
+func TestPushAndPullUseDistinctKeys(t *testing.T) {
+	m := withArtifacts(newTestModel())
+	m = press(t, m, keys("P"))
+	if m.state != statePush {
+		t.Fatalf("shift+p should open the push dialog, got state %d", m.state)
+	}
+	m = press(t, m, escMsg)
+	m = press(t, m, keys("p"))
+	if m.state != stateInputPath {
+		t.Fatalf("lowercase p should open the pull path prompt, got state %d", m.state)
+	}
+}
+
+func TestPushFormRequiresSourceAndTag(t *testing.T) {
+	m := press(t, withArtifacts(newTestModel()), keys("P"))
+	m = press(t, m, enterMsg) // tag is prefilled, source is not
+	if m.state != statePush {
+		t.Fatalf("an incomplete form must stay open, got state %d", m.state)
+	}
+	if m.op != opNone {
+		t.Fatalf("nothing may start before the form validates, got op %d", m.op)
+	}
+	if m.push.err == "" {
+		t.Fatal("the missing field must be reported in the dialog")
+	}
+}
+
+func TestPushFormTabMovesBetweenFieldsAndKeepsValues(t *testing.T) {
+	m := press(t, withArtifacts(newTestModel()), keys("P"), keys("/tmp/build"))
+	if m.push.fields[pushFieldSource].value != "/tmp/build" {
+		t.Fatalf("typing must reach the source field, got %q", m.push.fields[pushFieldSource].value)
+	}
+	m = press(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	if m.push.focus != pushFieldTag {
+		t.Fatalf("tab should advance to the tag field, got %d", m.push.focus)
+	}
+	if m.push.fields[pushFieldTag].value == "" {
+		t.Fatal("the prefilled tag should still be there after tabbing away and back")
+	}
+}
+
+func TestPushFormRejectsWhitespaceInTag(t *testing.T) {
+	f := newPushForm()
+	f.fields[pushFieldSource].value = "/tmp/build"
+	f.fields[pushFieldTag].value = "my tag"
+	if err := f.validate(); err == "" {
+		t.Fatal("a tag containing whitespace must be rejected")
+	}
+	f.fields[pushFieldTag].value = "v1.0.0"
+	f.fields[pushFieldLabels].value = "env=prod,broken"
+	if err := f.validate(); err == "" {
+		t.Fatal("a malformed label must be rejected rather than silently dropped")
+	}
+	f.fields[pushFieldLabels].value = "env=prod build=1"
+	if err := f.validate(); err != "" {
+		t.Fatalf("well-formed labels must pass, got %v", err)
+	}
+}
+
+func TestPushStartsWithSubmittedForm(t *testing.T) {
+	m := press(t, withArtifacts(newTestModel()), keys("P"), keys("/tmp/build"))
+	m = press(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	m = press(t, m, tea.KeyMsg{Type: tea.KeyCtrlU}) // clear the prefilled date
+	m = press(t, m, keys("v1.0.0"), enterMsg)
+	if m.op != opPush {
+		t.Fatalf("a valid form should start the push, got op %d", m.op)
+	}
+	if m.opTarget != "alpha:v1.0.0" {
+		t.Fatalf("unexpected push target %q", m.opTarget)
+	}
+}
+
+func TestPushFormMasksPassphraseWhenNotFocused(t *testing.T) {
+	m := press(t, withArtifacts(newTestModel()), keys("P"))
+	m.push.fields[pushFieldPassphrase].value = "hunter2"
+	m = press(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	view := m.View()
+	if strings.Contains(view, "hunter2") {
+		t.Fatalf("the passphrase must not be on screen once it loses focus:\n%s", view)
+	}
+}
+
+func TestPushEscCancelsWithoutStarting(t *testing.T) {
+	m := press(t, withArtifacts(newTestModel()), keys("P"), keys("/tmp/build"), escMsg)
+	if m.state != stateBrowse || m.op != opNone {
+		t.Fatalf("esc must close the dialog without pushing, got state %d op %d", m.state, m.op)
+	}
+}
+
+func TestEditLabelsSplitsSetFromUnset(t *testing.T) {
+	m := press(t, withArtifacts(newTestModel()), keys("e"))
+	if m.state != stateEditLabels {
+		t.Fatalf("e should open the label editor, got state %d", m.state)
+	}
+	m = press(t, m, keys("env=prod,stale"), enterMsg)
+	if m.op != opLabel {
+		t.Fatalf("submitting labels should start the update, got op %d", m.op)
+	}
+	if m.opTarget != "alpha:v1" {
+		t.Fatalf("unexpected label target %q", m.opTarget)
+	}
+}
+
+func TestEditLabelsEmptyInputDoesNothing(t *testing.T) {
+	m := press(t, withArtifacts(newTestModel()), keys("e"), enterMsg)
+	if m.op != opNone || m.state != stateBrowse {
+		t.Fatalf("an empty editor must not call the registry, got op %d state %d", m.op, m.state)
+	}
+}
+
+// An empty repository and an over-narrow filter look identical in the table
+// but need opposite actions, so the copy has to tell them apart.
+func TestEmptyRepositoryAndEmptyFilterAreDistinct(t *testing.T) {
+	m := withArtifacts(newTestModel())
+	m.artifacts = nil
+	m.applyFilter()
+	view := m.View()
+	if !strings.Contains(view, "no artifacts yet") || !strings.Contains(view, "P pushes") {
+		t.Fatalf("an empty repository should offer the push action:\n%s", view)
+	}
+	m2 := withArtifacts(newTestModel())
+	m2.setFilter("zzz")
+	view2 := m2.View()
+	if !strings.Contains(view2, "No tags match") {
+		t.Fatalf("a filtered-empty table must say the filter is the cause:\n%s", view2)
+	}
+	if strings.Contains(view2, "no artifacts yet") {
+		t.Fatalf("a filtered-empty table must not claim the repository is empty:\n%s", view2)
 	}
 }
 
