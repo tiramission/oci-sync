@@ -10,22 +10,17 @@ import (
 //
 // MyGo's palette works for controls, but a few of its text pairs sit below
 // the WCAG AA threshold for body text once this GUI puts secondary text on a
-// Surface background. Measured, not guessed — these numbers come from the
-// light and dark palettes in ui/theme.go:
+// Surface background or on a selected row. Measured, not guessed — these
+// numbers come from the light and dark palettes in ui/theme.go:
 //
 //	TextMuted on Background   light 4.83   dark 6.91
 //	TextMuted on Surface      light 4.40   dark 5.81   <- light fails AA (4.5)
+//	TextMuted on Selection    light 3.37   dark 3.88   <- both fail AA
 //	Warning   on Background   light 3.19   dark 8.25   <- light is amber on white
 //
-// So those two get a colour that clears aaNormal. Everything else keeps the
-// theme's own colour: a helper that second-guessed the palette everywhere
-// would drift away from it as MyGo updates.
-//
-// There is deliberately no helper for text on th.Selection. Selection used
-// to be a tinted row fill, which put TextMuted at 3.37:1 (light) and 3.88:1
-// (dark) — the worst pair in the window. The chosen row is now marked with
-// an accent bar instead, so no text sits on a tinted background and the
-// problem is gone rather than corrected. See selectedBarWidth.
+// So the three of them get a colour that clears aaNormal. Everything else
+// keeps the theme's own colour: a helper that second-guessed the palette
+// everywhere would drift away from it as MyGo updates.
 
 // aaNormal is the WCAG AA contrast ratio for text below 18.66px bold or 24px
 // regular. All of this GUI's body text is smaller than that, so 4.5 is the
@@ -37,6 +32,12 @@ const aaNormal = 4.5
 // comes back untouched.
 func readableSecondary(th *ui.Theme) ui.Color {
 	return ensureContrast(th.TextMuted, th.Surface, th.Text, aaNormal)
+}
+
+// readableOnSelection is TextMuted made legible against a selected row. Both
+// themes need it: a translucent accent behind muted grey lands near 3.4:1.
+func readableOnSelection(th *ui.Theme) ui.Color {
+	return ensureContrast(th.TextMuted, th.Selection.Over(th.Background), th.Text, aaNormal)
 }
 
 // readableWarning is the theme's Warning. On the light palette it is an
@@ -83,7 +84,7 @@ func contrastRatio(a, b ui.Color) float32 {
 }
 
 // relativeLuminance implements the WCAG formula on sRGB values. Alpha is
-// ignored, so composite a translucent colour before measuring it.
+// ignored, so composite a translucent colour first (see readableOnSelection).
 func relativeLuminance(c ui.Color) float32 {
 	return 0.2126*linearize(c.R) + 0.7152*linearize(c.G) + 0.0722*linearize(c.B)
 }

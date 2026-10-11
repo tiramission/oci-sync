@@ -420,12 +420,6 @@ func (a *guiApp) viewToolbar(c *ui.Context) {
 	})
 }
 
-// selectedBarWidth is the width of the accent bar that marks the chosen
-// shortcut. It is drawn on every row and only its colour changes, because a
-// border takes room inside the element: a bar that appeared on selection
-// alone would shove that row's text sideways and leave a gap in the column.
-const selectedBarWidth float32 = 3
-
 func (a *guiApp) viewSidebar(c *ui.Context) {
 	th := c.Theme()
 	// The list has to Grow and the column FillHeight, or the list takes its
@@ -453,44 +447,33 @@ func (a *guiApp) viewSidebar(c *ui.Context) {
 				return
 			}
 			s := a.shortcuts[r.Index]
-
-			// Selection is an accent bar on the leading edge, not a change
-			// of background. A tinted fill reads as a hover or a pressed
-			// state and, worse, puts muted text on a tinted background —
-			// the worst contrast pair in the window. The bar is drawn at a
-			// fixed width on every row and only its colour changes: a
-			// border takes room inside the element, so a border that
-			// appeared only on the selected row would shift that row's
-			// text sideways and every row below it.
-			marker := ui.Transparent
+			bg := th.Background
 			if r.Selected() {
-				marker = th.Accent
+				bg = th.Selection
 			}
-
-			ui.Column(c).
-				FillWidth().
-				Gap(2).
-				BorderWidth(0, 0, 0, selectedBarWidth).
-				BorderColor(marker).
-				Padding(5, 6).
-				Children(func() {
-					// Bold takes no argument, so a conditional style has to
-					// branch on the whole call: an Element is registered with
-					// the build pass by the call that creates it.
-					if r.Selected() {
-						ui.Text(c, s.Name).Bold().TextColor(th.Accent).MaxLines(1).Ellipsis("…")
-					} else {
-						ui.Text(c, s.Name).MaxLines(1).Ellipsis("…")
-					}
-					// With the fill gone, the repo line sits on the window
-					// background on every row, so one secondary colour
-					// covers them all.
-					ui.Text(c, s.Repo).
-						TextColor(readableSecondary(th)).
-						FontSize(12).
-						SingleLine().
-						Ellipsis("…")
-				})
+			ui.Column(c).FillWidth().Gap(2).Padding(5, 6).Background(bg).Children(func() {
+				// Bold takes no argument, so a conditional style has to
+				// branch on the whole call: an Element is registered with
+				// the build pass by the call that creates it.
+				if r.Selected() {
+					ui.Text(c, s.Name).Bold().MaxLines(1).Ellipsis("…")
+				} else {
+					ui.Text(c, s.Name).MaxLines(1).Ellipsis("…")
+				}
+				// The repo line is the one that identifies where this
+				// shortcut points, so it stays legible on both row
+				// backgrounds — muted grey over the selection tint is the
+				// worst pair in the window at 3.37:1.
+				repoColor := readableSecondary(th)
+				if r.Selected() {
+					repoColor = readableOnSelection(th)
+				}
+				ui.Text(c, s.Repo).
+					TextColor(repoColor).
+					FontSize(12).
+					SingleLine().
+					Ellipsis("…")
+			})
 		})
 		// Grow last, so the list takes the room the header leaves. Without
 		// it the rows would sit at their natural height.

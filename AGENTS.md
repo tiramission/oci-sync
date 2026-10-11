@@ -74,16 +74,10 @@ CLI 保持英文，因此这些文案就地写在 GUI 里，不抽成共享文�
 新增中文文案后要重跑 `cmd` 里的布局回归测试。
 
 **GUI 文字对比度**：不要直接拿 `th.TextMuted` / `th.Warning` 当正文色。MyGo 调色板里有几组配对
-低于 WCAG AA 正文阈值（4.5:1）——`TextMuted`/`Surface` 浅色 4.40、`Warning`/`Background` 浅色 3.19。
-用 `cmd/gui_contrast.go` 里的 `readableSecondary` / `readableWarning`，它们只在不达标时才动手，
+低于 WCAG AA 正文阈值（4.5:1）——`TextMuted`/`Surface` 浅色 4.40、`TextMuted`/`Selection`
+浅色 3.37 深色 3.88、`Warning`/`Background` 浅色 3.19。用 `cmd/gui_contrast.go` 里的
+`readableSecondary` / `readableOnSelection` / `readableWarning`，它们只在不达标时才动手，
 且只改到刚好达标。新增次要文字时同理，并跑 `gui_contrast_test.go`。
-
-**选中态用边框，不用底色**：侧边栏选中行只在首边缘画一条 `th.Accent` 竖条（`selectedBarWidth`），
-不要改成 `th.Selection` 底色。两个原因：tint 底色看起来像 hover/按下；更要命的是它把
-`TextMuted` 压到浅色 3.37 / 深色 3.88，是全窗口最差的一组配对。改成边框后没有任何文字叠在
-tint 上，这个问题是**根除**而不是校正，所以不存在 `readableOnSelection` 这个辅助函数。
-边框在 MyGo 里占元素**内部**空间，所以竖条每行都画、只有颜色变；只在选中时才加边框会把该行
-文字横向挤动，并在列里留一道缺口。
 
 **安全：** 所有文件解包都使用 `filepath.Abs()` 防止路径穿越攻击（见 `internal/archive/archive.go`）。
 

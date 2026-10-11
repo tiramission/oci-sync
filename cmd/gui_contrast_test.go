@@ -24,6 +24,7 @@ func TestReadableHelpersClearAA(t *testing.T) {
 			}{
 				{"secondary on Surface", readableSecondary(th), th.Surface},
 				{"secondary on Background", readableSecondary(th), th.Background},
+				{"secondary on Selection", readableOnSelection(th), th.Selection.Over(th.Background)},
 				{"warning on Background", readableWarning(th), th.Background},
 			}
 			for _, tc := range cases {

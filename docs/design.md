@@ -610,9 +610,7 @@ oci-sync gui
 
 **界面分区**：
 - **Toolbar（顶部）**：应用名、tag 过滤输入框、加载指示、`刷新` 按钮。
-- **快捷方式（左侧边栏）**：配置的 shortcuts。**选中态是首边缘一条 `th.Accent` 竖条
-  （`selectedBarWidth = 3`），不是底色**——见下方「文本可读性」。选中行的名称同时
-  `Bold()` 并取 `th.Accent`，与竖条一起给出双重提示。
+- **快捷方式（左侧边栏）**：配置的 shortcuts，选中行以主题 `Selection` 色高亮。
 - **产物（右侧主栏）**：当前 shortcut 的 tag 表格（`标签`、`大小`、`加密`、`版本`），
   带失败原因、空态说明与加载态文案。
 - **操作区（表格下方）**：`推送…` / `拉取…` / `删除…`。推送作用于当前仓库，未选中行时仍可用；
@@ -642,25 +640,15 @@ oci-sync gui
 |---|---|---|
 | `TextMuted` / `Background` | 4.83 | 6.91 |
 | `TextMuted` / `Surface` | **4.40** | 5.81 |
+| `TextMuted` / `Selection` | **3.37** | **3.88** |
 | `Warning` / `Background` | **3.19** | 8.25 |
 
-因此两个辅助函数：`readableSecondary`（Surface 上的次要文字）、
-`readableWarning`（表格里的「是」）。
+因此三个辅助函数：`readableSecondary`（Surface 上的次要文字）、
+`readableOnSelection`（选中行上的仓库路径）、`readableWarning`（表格里的「是」）。
 `ensureContrast` 在 `Color.Mix` 的混合系数上二分，找到**刚好**达标的最小改动——
 既不无脑加深（那会把整个界面压成同一个色调），也不闭式反解 WCAG 公式
 （那等于在这里重写一份 Mix，还可能和渲染器算得不一样）。
 表单字段标签是「指令」而非装饰，直接用 `th.Text`。
-
-**为什么没有 `readableOnSelection`**：选中行过去是一块 `th.Selection` tint 底色，把
-`TextMuted` 压到浅色 **3.37** / 深色 **3.88**——全窗口最差的一组配对，只能事后校正。
-现在选中态改为首边缘的 accent 竖条，没有任何文字叠在 tint 上，这对配对**根本不存在**，
-问题被根除而非修正，于是这个辅助函数连同它的测试一并删除。
-`ui.List` / `ui.Table` 对 chosen row 只画圆角和 hover（`SurfaceHover`），本身不带选中底色，
-所以去掉 tint 后没有残留。
-
-竖条宽度固定为 `selectedBarWidth = 3`，**每行都画**，只有颜色在 `ui.Transparent` 与
-`th.Accent` 之间切换。因为 MyGo 的 `Border` 在元素**内部**占位（CSS 语义），只在选中时才
-加边框会把该行文字横向挤动约 3px，并在竖条那一列留下缺口。始终占位则每行对齐一致。
 
 `cmd/gui_contrast_test.go` 锁住这些数字：MyGo 换配色时会红。
 
