@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
 	"charm.land/log/v2"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/tiramission/oci-sync/internal/cache"
 	"github.com/tiramission/oci-sync/internal/config"
 	"github.com/tiramission/oci-sync/internal/oci"
 )
@@ -34,6 +36,7 @@ const (
 	guiOpPull
 	guiOpDelete
 	guiOpPush
+	guiOpLabel
 )
 
 // guiModal is the state of the overlay on top of the artifact table.
@@ -57,6 +60,13 @@ type guiModal struct {
 	// labels is one "key=value" per line, which is also how it is passed
 	// to runPush, so what the user typed is what gets parsed.
 	labels string
+
+	// labelEdits is the same shape as labels but for the label editor, and
+	// currentLabels is the artifact's labels as found, so the dialog can
+	// show what is there now. They are separate from labels because a push
+	// and a label edit never run together.
+	labelEdits    string
+	currentLabels []string
 
 	busy bool
 	// err holds a failure from the last attempt. The modal stays open so
@@ -371,6 +381,55 @@ func (a *guiApp) failModal(err error) {
 	a.win.Update(func() { a.finishModal(err) })
 }
 
+// startLabel applies the editor buffer: entries with '=' set or update a
+// label, bare keys remove one, which covers both halves of the CLI's label
+// set / unset pair in a single field.
+func (a *guiApp) startLabel() {
+	shortcut := a.currentShortcut().Name
+	tag := a.modal.tag
+	edits := a.modal.labelEdits
+	win := a.win
+	go func() {
+		ref, err := buildShortcutRemoteRef(shortcut, tag)
+		if err != nil {
+			a.failModal(err)
+			return
+		}
+		var sets, unsets []string
+		for _, entry := range splitLabels(edits) {
+			if strings.Contains(entry, "=") {
+				sets = append(sets, entry)
+			} else {
+				unsets = append(unsets, entry)
+			}
+		}
+		// Set before unset: removing a key this same edit just added would
+		// be surprising, and the order also matches how the two CLI commands
+		// read.
+		if len(sets) > 0 {
+			if err := runLabelSet(context.Background(), ref, sets); err != nil {
+				a.failModal(err)
+				return
+			}
+		}
+		if len(unsets) > 0 {
+			if err := runLabelUnset(context.Background(), ref, unsets); err != nil {
+				a.failModal(err)
+				return
+			}
+		}
+		if win == nil {
+			return
+		}
+		win.Update(func() {
+			a.closeModal()
+			// The digest moved when annotations changed, so the row has to
+			// be re-listed rather than patched in place.
+			a.refresh()
+		})
+	}()
+}
+
 func (a *guiApp) finishModal(err error) {
 	a.modal.busy = false
 	a.modal.err = err
@@ -383,14 +442,80 @@ func (a *guiApp) closeModal() {
 
 // view builds one frame. Every branch below must stay free of I/O.
 func (a *guiApp) view(c *ui.Context) {
+	// The theme is retuned here rather than once at startup so it follows
+	// the window between light and dark while it stays open.
+	applyDesignTheme(c.Theme())
 	ui.Column(c).Fill().Gap(0).Children(func() {
 		a.viewToolbar(c)
 		ui.Row(c).Grow(1).FillWidth().Gap(0).Children(func() {
 			a.viewSidebar(c)
 			a.viewMain(c)
 		})
+		a.viewStatusBar(c)
 		a.viewModal(c)
 	})
+}
+
+// viewStatusBar is a permanent strip along the bottom. The activity cache
+// already records every operation, but reaching it means another command;
+// the last action is the thing users check most often.
+func (a *guiApp) viewStatusBar(c *ui.Context) {
+	th := c.Theme()
+	// FillWidth, not Fill: Fill would claim the parent column's height too.
+	ui.Row(c).FillWidth().Gap(8).Padding(7, 14).Background(th.Surface).Children(func() {
+		ui.Text(c, a.statusLine(th)).
+			TextColor(readableSecondary(th)).FontSize(12).MaxLines(1).Ellipsis("…")
+	})
+}
+
+// statusLine describes where the app is: what just happened, or what the
+// user is looking at when nothing has happened yet.
+func (a *guiApp) statusLine(th *ui.Theme) string {
+	switch {
+	case a.listErr != nil:
+		return "加载失败：" + a.listErr.Error()
+	case a.loading:
+		return "正在加载 " + a.currentShortcut().Repo + "…"
+	}
+	if line := lastActivityLine(); line != "" {
+		return line
+	}
+	if x, ok := a.selectedArtifact(); ok {
+		return fmt.Sprintf("已选中 %s · %s · %s", x.Tag, formatBytes(x.Size),
+			map[bool]string{true: "已加密", false: "未加密"}[x.Encrypted])
+	}
+	return "就绪。选择一个仓库开始。"
+}
+
+// lastActivityLine renders the newest cache entry for the status bar. The
+// wording lives here rather than in internal/cache: that package is the
+// store and knows nothing about any interface language.
+func lastActivityLine() string {
+	acts, err := cache.GetRecentActivities(1)
+	if err != nil || len(acts) == 0 {
+		return ""
+	}
+	act := acts[0]
+	when := act.Timestamp.Format("15:04")
+	if act.Success {
+		return fmt.Sprintf("%s %s %s", when, activityVerb(act.Type), act.RemoteRef)
+	}
+	return fmt.Sprintf("%s %s %s 失败", when, activityVerb(act.Type), act.RemoteRef)
+}
+
+func activityVerb(t cache.ActivityType) string {
+	switch t {
+	case cache.ActivityPush:
+		return "已推送"
+	case cache.ActivityPull:
+		return "已拉取"
+	case cache.ActivityDelete:
+		return "已删除"
+	case cache.ActivityLabel:
+		return "已改标签"
+	default:
+		return "操作"
+	}
 }
 
 func (a *guiApp) viewToolbar(c *ui.Context) {
@@ -424,10 +549,7 @@ func (a *guiApp) viewSidebar(c *ui.Context) {
 	th := c.Theme()
 	// The list has to Grow and the column FillHeight, or the list takes its
 	// natural height and pushes the rest of the window out of view.
-	ui.Column(c).FillHeight().Width(220).Gap(6).Padding(10).Children(func() {
-		// A section heading in caps-sized grey is the weakest text in the
-		// window, so it gets the readable secondary colour and a size that
-		// still reads as a heading rather than a caption.
+	ui.Column(c).FillHeight().Width(232).Gap(6).Padding(12, 10).Children(func() {
 		ui.Text(c, "快捷方式").
 			TextColor(readableSecondary(th)).
 			FontSize(12).
@@ -447,19 +569,36 @@ func (a *guiApp) viewSidebar(c *ui.Context) {
 				return
 			}
 			s := a.shortcuts[r.Index]
+			// The selection is a tint rather than a full-strength block: a
+			// solid fill over a multi-row table shouts louder than the state
+			// deserves, and it forces every child to find a colour that
+			// survives it.
 			bg := th.Background
+			nameColor := th.Text
 			if r.Selected() {
 				bg = th.Selection
+				nameColor = violet600
 			}
-			ui.Column(c).FillWidth().Gap(2).Padding(5, 6).Background(bg).Children(func() {
-				// Bold takes no argument, so a conditional style has to
-				// branch on the whole call: an Element is registered with
-				// the build pass by the call that creates it.
-				if r.Selected() {
-					ui.Text(c, s.Name).Bold().MaxLines(1).Ellipsis("…")
-				} else {
-					ui.Text(c, s.Name).MaxLines(1).Ellipsis("…")
-				}
+			ui.Column(c).FillWidth().Gap(3).Padding(8, 10).Background(bg).Children(func() {
+				// Name and count share a row so the count reads as a badge
+				// on the repository rather than as another field.
+				ui.Row(c).FillWidth().Gap(6).Children(func() {
+					// Bold takes no argument, so a conditional style has to
+					// branch on the whole call: an Element is registered with
+					// the build pass by the call that creates it.
+					if r.Selected() {
+						ui.Text(c, s.Name).Bold().TextColor(nameColor).
+							MaxLines(1).Ellipsis("…").Grow(1)
+					} else {
+						ui.Text(c, s.Name).TextColor(nameColor).
+							MaxLines(1).Ellipsis("…").Grow(1)
+					}
+					if n := a.shortcutCount(r.Index); n > 0 {
+						ui.Text(c, fmt.Sprintf("%d", n)).
+							TextColor(readableSecondary(th)).
+							FontSize(11)
+					}
+				})
 				// The repo line is the one that identifies where this
 				// shortcut points, so it stays legible on both row
 				// backgrounds — muted grey over the selection tint is the
@@ -470,7 +609,7 @@ func (a *guiApp) viewSidebar(c *ui.Context) {
 				}
 				ui.Text(c, s.Repo).
 					TextColor(repoColor).
-					FontSize(12).
+					FontSize(11).
 					SingleLine().
 					Ellipsis("…")
 			})
@@ -483,6 +622,16 @@ func (a *guiApp) viewSidebar(c *ui.Context) {
 			a.selectShortcut(a.navSel)
 		}
 	})
+}
+
+// shortcutCount is the badge beside a repository name. Only the repository
+// that has actually been listed shows a number; the rest would be zeroes
+// that mean "never loaded" rather than "empty", which is a different thing.
+func (a *guiApp) shortcutCount(row int) int {
+	if row != a.navSel {
+		return 0
+	}
+	return len(a.artifacts)
 }
 
 func (a *guiApp) selectShortcut(row int) {
@@ -509,7 +658,14 @@ func (a *guiApp) viewMain(c *ui.Context) {
 			head = a.currentShortcut().Repo
 		}
 		rows := a.guiVisible()
-		ui.Text(c, fmt.Sprintf("%s — 共 %d 个 tag", head, len(rows))).TextColor(readableSecondary(th))
+		// A repository with nothing in it and a filter that hides
+		// everything both render as an empty table, but they need
+		// opposite actions: push, or clear the filter.
+		headSuffix := fmt.Sprintf("共 %d 个 tag", len(rows))
+		if len(rows) != len(a.artifacts) {
+			headSuffix = fmt.Sprintf("匹配 %d / %d 个 tag", len(rows), len(a.artifacts))
+		}
+		ui.Text(c, fmt.Sprintf("%s — %s", head, headSuffix)).TextColor(readableSecondary(th))
 
 		// Exactly one of these takes the room the header and the action row
 		// leave. Without Grow/FillHeight on the table it would claim its
@@ -518,53 +674,159 @@ func (a *guiApp) viewMain(c *ui.Context) {
 		switch {
 		case a.listErr != nil:
 			ui.Text(c, "无法列出 tag："+a.listErr.Error()).TextColor(th.Danger)
+			// A failed listing is the state most likely to be transient
+			// (expired credentials, a network blip), so the recovery is
+			// one click rather than a restart.
+			if ui.Button(c, "重试").Clicked() {
+				a.refresh()
+			}
 			ui.Spacer(c)
 		case a.loading && len(rows) == 0:
 			ui.Text(c, "加载中…").TextColor(readableSecondary(th))
 			ui.Spacer(c)
+		case len(rows) == 0 && len(a.artifacts) > 0:
+			ui.Text(c, "没有 tag 匹配「"+a.filter+"」。").TextColor(readableSecondary(th))
+			if ui.Button(c, "清除过滤").Clicked() {
+				a.filter = ""
+				a.invalidate()
+			}
+			ui.Spacer(c)
 		case len(rows) == 0:
-			ui.Text(c, "暂无 artifact。可用 'oci-sync push' 推送一个，或清除过滤条件。").
-				TextColor(readableSecondary(th))
+			ui.Text(c, "此仓库还没有 artifact。").TextColor(readableSecondary(th))
 			ui.Spacer(c)
 		default:
-			// Chinese headers are two cells wide per character, so each
-			// title needs a little more room than its English original did.
-			cols := []ui.TableColumn{
-				{Title: "标签", ID: "tag", Width: 240},
-				{Title: "大小", ID: "size", Width: 100, Align: ui.End},
-				{Title: "加密", ID: "enc", Width: 60},
-				{Title: "版本", ID: "version", Width: 90},
-			}
-			ui.Table(c, &a.tableList, cols, len(rows), func(row, col int) {
-				x := rows[row]
-				switch col {
-				case 0:
-					ui.Text(c, x.Tag).MaxLines(1).Ellipsis("…")
-				case 1:
-					ui.Text(c, formatBytes(x.Size))
-				case 2:
-					// "是" marks an encrypted artifact, which is the one
-					// cell worth noticing in a scan, so it takes the
-					// readable warning colour; "否" is the absence of
-					// news and stays quiet.
-					if x.Encrypted {
-						ui.Text(c, "是").TextColor(readableWarning(th)).Bold()
-					} else {
-						ui.Text(c, "否").TextColor(readableSecondary(th))
-					}
-				case 3:
-					ui.Text(c, x.Version)
-				}
-			}).Grow(1).FillHeight()
+			a.viewArtifactTable(c, rows)
 		}
 
 		a.viewActions(c)
 	})
 }
 
+// viewArtifactTable draws the artifact grid.
+//
+// It is a ui.List drawn by hand rather than a ui.Table, because the design
+// system asks for a tinted selected row with an accent bar down its left
+// edge, and ui.Table paints the chosen row in a solid Accent block with no
+// hook to restyle it. Over a three-row grid that block is a slab of colour
+// for a state the user is only glancing at, and it drags every cell colour
+// along with it. Drawing the rows keeps the tint, and costs the column
+// resize handles — a grid this narrow does not need them.
+//
+// Column widths are fixed rather than measured: the tag column takes the
+// room the others leave, which is what lets a long tag ellipsize instead of
+// pushing the numbers off the edge.
+func (a *guiApp) viewArtifactTable(c *ui.Context, rows []oci.ArtifactInfo) {
+	th := c.Theme()
+	ui.Column(c).Grow(1).FillHeight().Gap(0).Children(func() {
+		a.artifactHeader(c)
+
+		list := ui.List(c, &a.tableList, len(rows))
+		// Keying on the tag rather than the index keeps the chosen row
+		// pointed at the same artifact after a reload reorders the slice.
+		list.ItemKey(func(row int) any {
+			if row < len(rows) {
+				return rows[row].Tag
+			}
+			return nil
+		})
+		list.Rows(func(r ui.ListRow) {
+			if r.Index >= len(rows) {
+				return
+			}
+			x := rows[r.Index]
+			bg := th.Background
+			// Text on the chosen row has to be re-picked, not inherited:
+			// the muted grey that reads well on white is the worst pair
+			// against the selection tint, and the warning amber for
+			// "encrypted" washes out completely.
+			ink, inkMuted := th.Text, readableSecondary(th)
+			if r.Selected() {
+				bg = th.Selection
+				ink = violet700
+				inkMuted = readableOnSelection(th)
+			}
+			ui.Row(c).FillWidth().AlignItems(ui.Center).
+				Padding(6, 10).Gap(10).Background(bg).Children(func() {
+				// The accent bar: a narrow rule at the row's own left
+				// edge, which is how the design marks the chosen row
+				// without recolouring the whole strip. It is a Box and
+				// not a Spacer: Spacer grows to fill, and Width does not
+				// take that back, so a Spacer bar would lie across the
+				// whole row instead of standing at its edge.
+				bar := bg
+				if r.Selected() {
+					bar = violet600
+				}
+				ui.Box(c).Width(2).Height(14).Background(bar)
+
+				ui.Text(c, x.Tag).Grow(1).MaxLines(1).Ellipsis("…").TextColor(ink)
+				ui.Text(c, formatBytes(x.Size)).Width(90).
+					Justify(ui.End).MaxLines(1).TextColor(inkMuted)
+				// "是" marks an encrypted artifact, the one cell worth
+				// noticing in a scan, so it takes the readable warning
+				// colour; "否" is the absence of news and stays quiet.
+				// The warning is resolved against the row's own
+				// background: the amber that clears AA on white does not
+				// clear it on the selection tint.
+				if x.Encrypted {
+					ui.Text(c, "是").Width(50).
+						TextColor(readableWarningOn(th, bg)).Bold()
+				} else {
+					ui.Text(c, "否").Width(50).TextColor(inkMuted)
+				}
+				ui.Text(c, x.Version).Width(80).MaxLines(1).TextColor(ink)
+			})
+		})
+		list.Grow(1).FillHeight()
+	})
+}
+
+// artifactHeader heads the grid. It sits on the tinted surface the design
+// gives the header band, and right-aligns the size column to match the cells
+// below it — a header that does not line up with its column is the fastest
+// way to make a grid hard to read.
+func (a *guiApp) artifactHeader(c *ui.Context) {
+	th := c.Theme()
+	label := func(s string) ui.Element {
+		return ui.Text(c, s).TextColor(readableSecondary(th)).FontSize(11.5).Bold()
+	}
+	ui.Row(c).FillWidth().AlignItems(ui.Center).
+		Padding(6, 12).Gap(10).Background(th.Surface).Children(func() {
+		// The 2px rule matches the row's accent bar, so the header sits
+		// over the cells rather than half a cell to the right of them.
+		ui.Box(c).Width(2).Height(1)
+		label("标签").Grow(1).Justify(ui.Start)
+		label("大小").Width(90).Justify(ui.End)
+		label("加密").Width(50)
+		label("版本").Width(80)
+	})
+}
+
+// viewActions lays the four operations out under the grid.
+//
+// The order is the design system's: push, pull, delete, labels. Delete sits
+// between the two reversible row actions rather than last because it is the
+// only one here that cannot be undone — putting it on the far side of the
+// row, next to nothing, is what keeps a slip from costing data.
+//
+// A hairline separates the row from the grid, so the buttons read as a
+// toolbar rather than as more table content. The column does not Grow: the
+// grid above already takes the slack, and a second Grow here would take
+// half of it back, parking the buttons in the middle of the window with a
+// field of empty space below them. Staying at its natural height is what
+// puts the row against the bottom edge.
 func (a *guiApp) viewActions(c *ui.Context) {
 	th := c.Theme()
-	ui.Row(c).Gap(8).Children(func() {
+	ui.Column(c).FillWidth().Gap(14).Children(func() {
+		ui.Box(c).FillWidth().Height(1).Background(th.Border)
+		a.viewActionButtons(c)
+	})
+}
+
+// viewActionButtons is the button row itself, without the rule above it.
+func (a *guiApp) viewActionButtons(c *ui.Context) {
+	th := c.Theme()
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
 		// Push targets the repository rather than a row, so it stays
 		// available when nothing is selected.
 		if ui.Button(c, "推送…").Clicked() {
@@ -573,7 +835,8 @@ func (a *guiApp) viewActions(c *ui.Context) {
 
 		x, ok := a.selectedArtifact()
 		if !ok {
-			ui.Text(c, "请选择一个 tag 以拉取或删除。").TextColor(readableSecondary(th))
+			ui.Text(c, "请选择一个 tag 以拉取、改标签或删除。").
+				TextColor(readableSecondary(th)).Grow(1)
 			return
 		}
 		if ui.PrimaryButton(c, "拉取…").Clicked() {
@@ -584,7 +847,29 @@ func (a *guiApp) viewActions(c *ui.Context) {
 		if a.dangerButton(c, "删除…").Clicked() {
 			a.openDeleteModal(x)
 		}
+		if ui.Button(c, "编辑标签…").Clicked() {
+			a.openLabelModal(x)
+		}
+		// MaxLines(1) because this row shares its height with the buttons: a
+		// summary that wraps turns the toolbar two rows tall and shoves
+		// the buttons off the bottom of a short window. A narrow window
+		// drops the clause rather than the line — the tag is what identifies
+		// the row, the size and the encryption flag are detail.
+		ui.Text(c, selectedSummary(x)).
+			TextColor(readableSecondary(th)).
+			MaxLines(1).Ellipsis("…").
+			Grow(1).Justify(ui.End)
 	})
+}
+
+// selectedSummary describes the row the row-scoped actions will act on, so
+// the user never has to look back up the grid to check which tag "it" is.
+func selectedSummary(x oci.ArtifactInfo) string {
+	s := x.Tag + " · " + formatBytes(x.Size)
+	if x.Encrypted {
+		return s + " · 已加密"
+	}
+	return s
 }
 
 // dangerButton is a plain button painted with the theme's Danger color, for
@@ -627,6 +912,29 @@ func (a *guiApp) openDeleteModal(x oci.ArtifactInfo) {
 		repo:    a.currentShortcut().Name,
 		title:   "删除 " + x.Tag,
 		confirm: "删除",
+	}
+	a.modalOpen = true
+}
+
+// openLabelModal opens the label editor for an artifact. It lists the labels
+// as found so the user edits against reality rather than from memory.
+func (a *guiApp) openLabelModal(x oci.ArtifactInfo) {
+	keys := make([]string, 0, len(x.Labels))
+	for k := range x.Labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	current := make([]string, 0, len(keys))
+	for _, k := range keys {
+		current = append(current, k+"="+x.Labels[k])
+	}
+	a.modal = guiModal{
+		kind:          guiOpLabel,
+		tag:           x.Tag,
+		repo:          a.currentShortcut().Name,
+		title:         "标签 · " + x.Tag,
+		confirm:       "应用",
+		currentLabels: current,
 	}
 	a.modalOpen = true
 }
@@ -790,6 +1098,27 @@ func (a *guiApp) viewModal(c *ui.Context) {
 					ui.TextArea(c, &m.labels).Lines(2, 4).FillWidth()
 				case guiOpDelete:
 					ui.Text(c, "这会从远程 registry 删除该 tag，且无法撤销。")
+				case guiOpLabel:
+					// Current labels are listed so the user edits against
+					// what is actually there instead of guessing.
+					if len(m.currentLabels) > 0 {
+						ui.Text(c, "当前标签").TextColor(th.Text)
+						ui.Column(c).FillWidth().Gap(2).Children(func() {
+							for _, line := range m.currentLabels {
+								ui.Text(c, line).
+									TextColor(readableSecondary(th)).
+									FontSize(12).
+									SingleLine().
+									Ellipsis("…")
+							}
+						})
+					}
+					ui.Text(c, "改动（每行一个）").TextColor(th.Text)
+					ui.TextArea(c, &m.labelEdits).Lines(3, 6).FillWidth()
+					// The hint rides on the label: it is a rule, not content,
+					// and the dialog is already tight at 720x420.
+					ui.Text(c, "key=value 设置或更新；只写 key 则移除").
+						TextColor(readableSecondary(th)).FontSize(11)
 				}
 
 				if m.busy && m.kind == guiOpPull {
@@ -823,6 +1152,8 @@ func (a *guiApp) viewModal(c *ui.Context) {
 							a.startPull()
 						case guiOpPush:
 							a.startPush()
+						case guiOpLabel:
+							a.startLabel()
 						default:
 							a.startDelete()
 						}

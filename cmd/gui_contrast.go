@@ -44,7 +44,16 @@ func readableOnSelection(th *ui.Theme) ui.Color {
 // amber that reaches only 3.19:1 on white — fine for a large glyph, not for
 // a table cell — so it is pulled toward Text until it passes.
 func readableWarning(th *ui.Theme) ui.Color {
-	return ensureContrast(th.Warning, th.Background, th.Text, aaNormal)
+	return readableWarningOn(th, th.Background)
+}
+
+// readableWarningOn is readableWarning against the surface the text is
+// actually drawn on. A row's background is not always the window's: the
+// chosen artifact row sits on the selection tint, and an amber tuned for
+// white is close to invisible there. Passing the real background keeps one
+// call from being right in one row and unreadable in the next.
+func readableWarningOn(th *ui.Theme, bg ui.Color) ui.Color {
+	return ensureContrast(th.Warning, bg, th.Text, aaNormal)
 }
 
 // ensureContrast moves fg toward fgAlt by the smallest amount that reaches

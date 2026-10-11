@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tiramission/oci-sync/internal/cache"
 	"github.com/tiramission/oci-sync/internal/config"
 	"github.com/tiramission/oci-sync/internal/oci"
 )
@@ -212,13 +214,30 @@ func TestGuiViewFilterHidesUnrelatedTags(t *testing.T) {
 	texts := tt.Texts()
 	assert.Contains(t, texts, "weekly")
 	assert.NotContains(t, texts, "daily")
-	assert.Contains(t, texts, "registry.example.com/me/photos — 共 1 个 tag")
+	// The header states both numbers so a partial result is never mistaken
+	// for the whole repository.
+	assert.Contains(t, texts, "registry.example.com/me/photos — 匹配 1 / 2 个 tag")
 }
 
 func TestGuiViewExplainsAnEmptyTable(t *testing.T) {
 	tt := newGuiTester(t, guiTestApp())
 
-	assert.Contains(t, tt.Texts(), "暂无 artifact。可用 'oci-sync push' 推送一个，或清除过滤条件。")
+	assert.Contains(t, tt.Texts(), "此仓库还没有 artifact。")
+}
+
+// An empty repository and a filter that hides everything both render as an
+// empty table, so the copy has to say which one it is and offer the fix.
+func TestGuiViewDistinguishesFilteredEmptyFromTrulyEmpty(t *testing.T) {
+	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1, false))
+	a.filter = "no-such-tag"
+	tt := newGuiTester(t, a)
+
+	texts := tt.Texts()
+	// Texts() yields whole rendered strings, so containment is a full match on
+	// one of them rather than a substring search.
+	assert.Contains(t, texts, "没有 tag 匹配「no-such-tag」。")
+	assert.Contains(t, texts, "清除过滤")
+	assert.NotContains(t, texts, "此仓库还没有 artifact。")
 }
 
 func TestGuiViewReportsAListFailure(t *testing.T) {
@@ -227,12 +246,211 @@ func TestGuiViewReportsAListFailure(t *testing.T) {
 	tt := newGuiTester(t, a)
 
 	assert.Contains(t, tt.Texts(), "无法列出 tag：registry unreachable")
+	// A failed listing is usually transient, so the recovery is reachable
+	// from the error state itself.
+	assert.Contains(t, tt.Texts(), "重试")
+}
+
+// isolateActivityCache points the activity cache at an empty temporary
+// directory and re-runs InitCache so the package level cacheDir follows.
+//
+// Setting XDG_CACHE_HOME alone is not enough: internal/cache memoises the
+// resolved path in a package variable, and any earlier test that called
+// InitCache with the real environment left it pointing at the developer's
+// actual history file. Re-initialising is what makes this hermetic.
+func isolateActivityCache(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	require.NoError(t, cache.InitCache())
+}
+
+// The status bar reads the newest activity from the on-disk cache, which on
+// a developer's machine holds real history. Tests must not depend on it, so
+// they point the cache at an empty directory and assert the fallback text.
+func TestGuiStatusBarFallsBackWhenNoActivityIsRecorded(t *testing.T) {
+	isolateActivityCache(t)
+
+	texts := newGuiTester(t, guiTestApp()).Texts()
+
+	// Nothing selected and no history: the bar says what the app is, not
+	// nothing at all.
+	assert.Contains(t, texts, "就绪。选择一个仓库开始。")
+}
+
+func TestGuiStatusBarReportsTheNewestActivity(t *testing.T) {
+	isolateActivityCache(t)
+	require.NoError(t, cache.AddActivity(cache.Activity{
+		Type:      cache.ActivityPush,
+		Timestamp: time.Now(),
+		RemoteRef: "registry.example.com/me/photos:v9",
+		Success:   true,
+	}))
+
+	texts := newGuiTester(t, guiTestApp()).Texts()
+
+	// The bar is one string: a clock, the verb and the reference. Matching
+	// on the tail rather than the exact line keeps this from failing when
+	// the clock ticks over a minute between the write and the render.
+	assert.True(t, containsTail(texts, "已推送 registry.example.com/me/photos:v9"),
+		"expected the pushed reference in the status bar, got %v", texts)
+}
+
+// containsTail reports whether any entry ends with suffix.
+func containsTail(entries []string, suffix string) bool {
+	for _, e := range entries {
+		if strings.HasSuffix(e, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestGuiStatusBarReportsAFailedOperation(t *testing.T) {
+	isolateActivityCache(t)
+	require.NoError(t, cache.AddActivity(cache.Activity{
+		Type:      cache.ActivityPull,
+		Timestamp: time.Now(),
+		RemoteRef: "registry.example.com/me/photos:v8",
+		Success:   false,
+	}))
+
+	assert.True(t, containsTail(newGuiTester(t, guiTestApp()).Texts(),
+		"已拉取 registry.example.com/me/photos:v8 失败"),
+		"expected the failed pull in the status bar")
+}
+
+func TestGuiStatusBarReportsAListFailure(t *testing.T) {
+	isolateActivityCache(t)
+	a := guiTestApp()
+	a.listErr = errors.New("registry unreachable")
+
+	assert.Contains(t, newGuiTester(t, a).Texts(), "加载失败：registry unreachable")
+}
+
+// The action row belongs to the bottom of the window, not to the bottom of
+// the grid. A grid that is shorter than its space must not drag the buttons
+// up with it: they are the only way to reach pull, delete and labels, and
+// a toolbar floating in the middle of an empty pane reads as the end of the
+// content rather than as something still to do.
+func TestGuiActionsStayAtTheBottomOfTheWindow(t *testing.T) {
+	const h = 640
+	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1, false))
+	a.tableSel = 0
+	tt := ui.NewTester(a.view, 1000, h)
+
+	btn, ok := tt.Find("推送…")
+	if !ok {
+		t.Fatal("push button not found")
+	}
+	// The status bar is 30-ish tall; the button should sit just above it,
+	// not halfway up.
+	if btn.Y < float32(h)*0.75 {
+		t.Errorf("push button at y=%.0f, want it near the bottom of a %d tall window", btn.Y, h)
+	}
+}
+
+// The same rule holds when the grid has nothing to show: the empty states
+// all leave slack, and the buttons must not drift up into it.
+func TestGuiActionsStayAtTheBottomWithAnEmptyRepository(t *testing.T) {
+	const h = 640
+	tt := ui.NewTester(guiTestApp().view, 1000, h)
+
+	btn, ok := tt.Find("推送…")
+	if !ok {
+		t.Fatal("push button not found")
+	}
+	if btn.Y < float32(h)*0.75 {
+		t.Errorf("push button at y=%.0f, want it near the bottom of a %d tall window", btn.Y, h)
+	}
+}
+
+// The chosen-row summary shares its row with the buttons, so it has to stay
+// on one line: a wrapped summary turns the toolbar two rows tall and can
+// push the buttons off the bottom of a short window. Measured on the row
+// rather than on the summary text, because at this width the summary is
+// legitimately ellipsized and cannot be found whole.
+func TestGuiActionRowStaysOneLineOnAShortWindow(t *testing.T) {
+	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1, false))
+	a.tableSel = 0
+	tt := ui.NewTester(a.view, 720, 420)
+
+	btn, ok := tt.Find("推送…")
+	if !ok {
+		t.Fatal("push button not found")
+	}
+	if btn.H > 40 {
+		t.Errorf("action row is %.0f tall, want a single line", btn.H)
+	}
+	// And the row as a whole must still clear the status bar at the bottom.
+	if btn.Y < 420*0.75 {
+		t.Errorf("push button at y=%.0f, want it near the bottom", btn.Y)
+	}
 }
 
 func TestGuiViewWithoutASelectionOffersNoActions(t *testing.T) {
 	tt := newGuiTester(t, guiTestApp())
 
-	assert.Contains(t, tt.Texts(), "请选择一个 tag 以拉取或删除。")
+	assert.Contains(t, tt.Texts(), "请选择一个 tag 以拉取、改标签或删除。")
+}
+
+// The action row names the row the row-scoped buttons will act on. Without
+// it "拉取" reads as a button with no object.
+func TestGuiActionsNameTheSelectedRow(t *testing.T) {
+	a := guiWithArtifacts(guiTestApp(), guiArtifact("nightly", 14<<20, true))
+	a.tableSel = 0
+
+	assert.Contains(t, newGuiTester(t, a).Texts(), "nightly · 14.0 MiB · 已加密")
+}
+
+// An unencrypted row says so by leaving the clause off, rather than by
+// spelling out "未加密" — the absence is the message.
+func TestGuiActionsOmitTheClauseForAPlainArtifact(t *testing.T) {
+	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1024, false))
+	a.tableSel = 0
+
+	texts := newGuiTester(t, a).Texts()
+	assert.True(t, containsTail(texts, "daily · 1.0 KiB"),
+		"expected tag and size in the action summary, got %v", texts)
+}
+
+// The grid is drawn by hand rather than with ui.Table, so its header is
+// worth pinning: a column header that drifts away from its column is the
+// fastest way to make a grid hard to read, and nothing else would catch it.
+func TestGuiGridShowsEveryColumnHeading(t *testing.T) {
+	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1, false))
+
+	texts := newGuiTester(t, a).Texts()
+	for _, h := range []string{"标签", "大小", "加密", "版本"} {
+		assert.Contains(t, texts, h)
+	}
+}
+
+// Delete sits between the two reversible row actions rather than at the
+// end of the row: it is the only one that cannot be undone.
+func TestGuiActionOrderPutsDeleteBetweenReversibleActions(t *testing.T) {
+	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1, false))
+	a.tableSel = 0
+
+	texts := newGuiTester(t, a).Texts()
+	push, pull, del, labels := indexOf(texts, "推送…"), indexOf(texts, "拉取…"),
+		indexOf(texts, "删除…"), indexOf(texts, "编辑标签…")
+	if push < 0 || pull < 0 || del < 0 || labels < 0 {
+		t.Fatalf("missing an action button in %v", texts)
+	}
+	if !(push < pull && pull < del && del < labels) {
+		t.Errorf("actions out of order: push=%d pull=%d delete=%d labels=%d",
+			push, pull, del, labels)
+	}
+}
+
+// indexOf returns where entry sits in texts, or -1.
+func indexOf(entries []string, want string) int {
+	for i, e := range entries {
+		if e == want {
+			return i
+		}
+	}
+	return -1
 }
 
 func TestGuiViewPullButtonOpensTheDialog(t *testing.T) {
@@ -444,7 +662,7 @@ func TestGuiViewPushButtonIsAvailableWithNothingSelected(t *testing.T) {
 	tt := newGuiTester(t, guiTestApp())
 
 	assert.Contains(t, tt.Texts(), "推送…")
-	assert.Contains(t, tt.Texts(), "请选择一个 tag 以拉取或删除。")
+	assert.Contains(t, tt.Texts(), "请选择一个 tag 以拉取、改标签或删除。")
 }
 
 func TestGuiViewPushButtonOpensTheDialog(t *testing.T) {
