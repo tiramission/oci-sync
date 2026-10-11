@@ -185,7 +185,7 @@ oci-sync/
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
-| `Pack` | `(w io.Writer, srcPath string) error` | 将文件或目录打包为 tar.gz 写入 w |
+| `Pack` | `(w io.Writer, srcPath string) error` | 将文件或目录打包为 tar.gz 写入 w（文件与目录都支持） |
 | `PackBytes` | `(srcPath string) ([]byte, error)` | `Pack` 的内存包装 |
 | `Unpack` | `(r io.Reader, destPath string) error` | 从 r 读取 tar.gz 并解包到指定目录 |
 | `UnpackBytes` | `(data []byte, destPath string) error` | `Unpack` 的内存包装 |
@@ -195,6 +195,11 @@ oci-sync/
 - 目录打包保留完整的子目录结构，以 `filepath.Walk` 遍历
 - tar 成员名统一用 `/` 分隔（`filepath.ToSlash`）：`filepath.Join` 在 Windows 上产生 `\`，会导致跨平台 push → pull 时目录结构塌陷为扁平文件名
 - 符号链接按目标内容打包为普通文件（Unpack 只落地普通文件与目录，若存链接目标则 round-trip 后全变空文件）；指向目录的链接跳过，避免子树重复
+- 顶层目录名由 `memberBase` 决定，不能直接用 `filepath.Base`：它对 `.` 返回 `.`、对 `..` 返回 `..`，
+  于是打包出的成员名是 `./file` 或 `../file`——push 照样成功（写 tar 不拒绝任何名字），
+  但每次 pull 都会因 `illegal file path in archive` 失败。**能推不能拉的 push 不算 push**，
+  这条只在用户最可能手输的路径上暴露。点路径因此改用 `filepath.Abs` 解析出的真实目录名；
+  文件系统根（`/`、`C:\`）没有名字可退，直接拒绝
 - 解包时进行路径穿越检查（Path Traversal Security）；以 `/` 开头的成员名会被 `filepath.Join` 折入目标目录内部，属于安全收敛而非拒绝
 - 打包与解包都是流式的；`*Bytes` 变体只保留给测试和不需要流式的调用方
 
@@ -610,8 +615,10 @@ oci-sync gui
   拉取 / 删除依赖选中行，未选中时该位置替换为提示文案。
 - **模态弹窗**：
   - 拉取——目标路径（带浏览按钮）+ 密码（仅加密产物要求输入）。
-  - 推送——源路径（文件或目录，带浏览按钮）、tag、加密开关与密码、标签（每行一个
-    `key=value`）。表单不完整时确认按钮置灰，错误紧邻出问题的字段显示，而不是等到
+  - 推送——源路径（**两个浏览按钮**：`选择文件…` 与 `选择目录…`）、tag、加密开关与密码、
+    标签（每行一个 `key=value`）。两个按钮是必需的：MyGo 的打开对话框把文件与目录设为互斥
+    （`OpenDialogOptions` 里 `OpenFiles = !Directory`），单个对话框无法同时接受两者，
+    否则 GUI 里就根本没法推送目录。表单不完整时确认按钮置灰，错误紧邻出问题的字段显示，而不是等到
     registry 往返失败才报一个不透明的错。
   - 删除确认、失败信息。拉取进行中显示阶段文案与下载进度条。
 
@@ -643,6 +650,8 @@ oci-sync gui
   必须在同一个 tester 内完成。
 - 布局断言用 `tt.Find(text)` 的 `Rect`：`h=0` 或 `y + h` 超出窗口高度即视为失败。最小窗口
   （720×420）是布局下限，弹窗内每个字段都要在此尺寸下断言。
+  **给弹窗加一行就可能触发它**：加「可推送文件或目录」提示行时，确认按钮被顶到 y=422.6 而溢出。
+  提示因此挂在字段标签上（`源路径（文件或目录）`）而不是独占一行。
 
 **未覆盖**：GUI 的 push / pull / delete 打到真实 registry 的端到端路径没有自动化测试——
 `internal/oci` 目前只有 `fanOut` 的纯逻辑测试，没有起临时 registry。这三条路径的正确性依赖

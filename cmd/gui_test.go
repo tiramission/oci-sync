@@ -456,11 +456,27 @@ func TestGuiViewPushButtonOpensTheDialog(t *testing.T) {
 	assert.Equal(t, guiOpPush, a.modal.kind)
 
 	texts := tt.Texts()
-	assert.Contains(t, texts, "源路径")
+	assert.Contains(t, texts, "源路径（文件或目录）")
 	assert.Contains(t, texts, "Tag")
 	assert.Contains(t, texts, "标签（每行一个 key=value）")
 	assert.Contains(t, texts, "加密")
 	assert.NotContains(t, texts, "密码", "the key field stays hidden until 加密 is on")
+}
+
+// TestGuiViewPushOffersBothBrowseKinds guards the reason there are two
+// browse buttons. MyGo's open dialog treats files and directories as
+// mutually exclusive — OpenDialogOptions sets OpenFiles to !Directory — so a
+// single "browse" can never accept both, and pushing a directory would be
+// impossible from the GUI even though the CLI has always allowed it.
+func TestGuiViewPushOffersBothBrowseKinds(t *testing.T) {
+	a := guiTestApp()
+	tt := newGuiTester(t, a)
+
+	require.NoError(t, tt.Click("推送…"))
+
+	texts := tt.Texts()
+	assert.Contains(t, texts, "选择文件…", "a file source must be pickable")
+	assert.Contains(t, texts, "选择目录…", "a directory source must be pickable too")
 }
 
 func TestGuiViewPushConfirmIsDisabledWithoutASource(t *testing.T) {
@@ -491,7 +507,7 @@ func TestGuiViewDeleteDialogHasNoPushFields(t *testing.T) {
 	require.NoError(t, tt.Click("删除…"))
 
 	texts := tt.Texts()
-	assert.NotContains(t, texts, "源路径")
+	assert.NotContains(t, texts, "源路径（文件或目录）")
 	assert.NotContains(t, texts, "标签（每行一个 key=value）")
 }
 
@@ -509,7 +525,7 @@ func TestGuiViewPushDialogFitsTheSmallestWindow(t *testing.T) {
 	tt.Frame()
 
 	for _, label := range []string{
-		"源路径", "Tag", "加密",
+		"源路径（文件或目录）", "Tag", "加密",
 		"标签（每行一个 key=value）",
 		"推送", "取消",
 	} {

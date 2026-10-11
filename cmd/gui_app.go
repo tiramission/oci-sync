@@ -663,17 +663,31 @@ func (m *guiModal) validatePush() error {
 	return nil
 }
 
-// browse asks the OS for a path. The native dialog blocks, so it runs off
-// the main thread and the answer comes back through Window.Update. dirs
-// selects directories only; otherwise files and folders are both offered,
-// which is what a push source can be.
-func (a *guiApp) browse(dest *string, dirs bool) {
+// guiPicker is what a Browse button should select. MyGo's open dialog treats
+// files and directories as mutually exclusive — OpenDialogOptions sets
+// OpenFiles to !Directory and OpenDirectories to Directory — so there is no
+// one dialog that accepts both, and a push source needs both.
+type guiPicker int
+
+const (
+	guiPickFile guiPicker = iota
+	guiPickDir
+)
+
+// browse asks the OS for a path of the given kind. The native dialog blocks,
+// so it runs off the main thread and the answer comes back through
+// Window.Update.
+func (a *guiApp) browse(dest *string, kind guiPicker) {
 	win := a.win
+	title := "选择文件"
+	if kind == guiPickDir {
+		title = "选择目录"
+	}
 	go func() {
 		picked, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 			Parent:      win,
-			Title:       "选择路径",
-			Directory:   dirs,
+			Title:       title,
+			Directory:   kind == guiPickDir,
 			DefaultPath: *dest,
 		})
 		if win == nil {
@@ -708,7 +722,7 @@ func (a *guiApp) viewModal(c *ui.Context) {
 					ui.Row(c).Gap(8).Children(func() {
 						ui.TextInput(c, &m.destPath).Grow(1).SingleLine()
 						if ui.Button(c, "浏览…").Clicked() {
-							a.browse(&m.destPath, true)
+							a.browse(&m.destPath, guiPickDir)
 						}
 					})
 					if m.passphraseShown {
@@ -716,11 +730,20 @@ func (a *guiApp) viewModal(c *ui.Context) {
 						ui.TextInput(c, &m.passphrase).Password().SingleLine()
 					}
 				case guiOpPush:
-					ui.Text(c, "源路径").TextColor(th.TextMuted)
+					// A push source is either a file or a directory, and the
+					// native dialog cannot offer both at once, so the two get
+					// a button each. Typing the path still works for either.
+					// The hint rides on the label rather than taking a row of
+					// its own: at 720x420 the dialog has no vertical room to
+					// spare, and the regression test enforces that.
+					ui.Text(c, "源路径（文件或目录）").TextColor(th.TextMuted)
 					ui.Row(c).Gap(8).Children(func() {
 						ui.TextInput(c, &m.srcPath).Grow(1).SingleLine()
-						if ui.Button(c, "浏览…").Clicked() {
-							a.browse(&m.srcPath, false)
+						if ui.Button(c, "选择文件…").Clicked() {
+							a.browse(&m.srcPath, guiPickFile)
+						}
+						if ui.Button(c, "选择目录…").Clicked() {
+							a.browse(&m.srcPath, guiPickDir)
 						}
 					})
 

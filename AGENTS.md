@@ -77,6 +77,8 @@ CLI 保持英文，因此这些文案就地写在 GUI 里，不抽成共享文�
 
 **大文件一律流式：** push/pull 不得把 artifact 整体读进内存。链路是 pack →（加密）→ staging 文件 → 上传，pull 反向，峰值内存是一个 1 MiB 分块（`crypto.ChunkSize`）。中间落地到文件不是偷懒：Registry 按内容 digest 寻址 blob，digest 必须先知道，而刚打好的 tar.gz 还不知道自己的 digest。改动这条链路时，内存版的 `archive.PackBytes`、`oci.Push`、`oci.Pull` 只能留给测试和非流式调用方。
 
+**能推就要能拉：** `archive.Pack` 用 `memberBase` 决定顶层目录名，**不要直接用 `filepath.Base`**——它对 `.` / `..` 返回 `.` / `..`，产出 `./x`、`../x` 这类成员名。写 tar 不拒绝任何名字，所以 push 会成功，而 pull 必然因 `illegal file path in archive` 失败。新增打包路径形态前，先确认 `Pack` → `Unpack` 能往返。
+
 **依赖（已锁定）：**
 - CLI 框架：`github.com/spf13/cobra`（必需）
 - OCI 交互：`oras.land/oras-go/v2`（必需且唯一）

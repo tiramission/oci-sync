@@ -26,13 +26,18 @@ func Pack(w io.Writer, srcPath string) error {
 		return fmt.Errorf("stat %s: %w", srcPath, err)
 	}
 
+	base, err := memberBase(srcPath, info.IsDir())
+	if err != nil {
+		return err
+	}
+
 	gw := gzip.NewWriter(w)
 	tw := tar.NewWriter(gw)
 
 	if info.IsDir() {
-		err = packDir(tw, srcPath, filepath.Base(srcPath))
+		err = packDir(tw, srcPath, base)
 	} else {
-		err = packFile(tw, srcPath, filepath.Base(srcPath))
+		err = packFile(tw, srcPath, base)
 	}
 	if err != nil {
 		return err
@@ -45,6 +50,61 @@ func Pack(w io.Writer, srcPath string) error {
 		return fmt.Errorf("close gzip writer: %w", err)
 	}
 	return nil
+}
+
+// memberBase returns the top-level directory name to store srcPath under.
+//
+// filepath.Base is not enough on its own: it answers "." for the working
+// directory and ".." for its parent, so packing those produces member names
+// like "../file". The push succeeds — nothing about writing a tar rejects
+// them — and then every pull fails, because Unpack refuses a path traversal
+// it is right to refuse. The archive and the unpacker disagreeing is the
+// whole bug, and it only shows up on the paths a user is most likely to type
+// by hand.
+//
+// A dot path therefore gets the name it resolves to on disk. A filesystem or
+// volume root is refused outright: it has no name to fall back on, and
+// archiving an entire drive is not something a push should attempt anyway.
+func memberBase(srcPath string, isDir bool) (string, error) {
+	base := filepath.Base(srcPath)
+
+	// A name that is nothing but separators is how Base spells a root:
+	// "/" on Unix, "\" for "C:\". Testing for the separator covers every
+	// platform's spelling instead of listing them.
+	if isRootName(base) {
+		return "", fmt.Errorf("cannot archive %s: it is a filesystem root", srcPath)
+	}
+
+	if !isDir {
+		// A regular file cannot be "." or "..", but a name that would
+		// escape the archive root still has no business being in one.
+		if base == "." || base == ".." {
+			return "", fmt.Errorf("cannot archive %s: unusable member name", srcPath)
+		}
+		return base, nil
+	}
+
+	if base != "." && base != ".." {
+		return base, nil
+	}
+
+	// Abs cleans the path, so this yields the real directory name for both
+	// "." and ".." — the wrapper the rest of the archive nests under, not
+	// an extra level above it.
+	abs, err := filepath.Abs(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", srcPath, err)
+	}
+	resolved := filepath.Base(abs)
+	if isRootName(resolved) || resolved == "." || resolved == ".." {
+		return "", fmt.Errorf("cannot archive %s: it is a filesystem root", srcPath)
+	}
+	return resolved, nil
+}
+
+// isRootName reports whether name is empty or made only of separators.
+func isRootName(name string) bool {
+	return strings.Trim(name, `/\`) == ""
 }
 
 // PackBytes packs srcPath and returns the compressed bytes. It buffers the
