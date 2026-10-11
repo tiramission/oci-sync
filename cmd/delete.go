@@ -38,7 +38,7 @@ func runDelete(ctx context.Context, remotePath string) error {
 	}
 	log.Info("Delete successful ✓", "ref", remotePath)
 
-	cache.AddActivity(cache.Activity{
+	recordActivity(cache.Activity{
 		Type:      cache.ActivityDelete,
 		Timestamp: time.Now(),
 		RemoteRef: remotePath,

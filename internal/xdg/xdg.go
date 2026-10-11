@@ -5,11 +5,26 @@ import (
 	"path/filepath"
 )
 
+// homeDir resolves the user's home directory. The HOME environment variable
+// is not set on Windows, so fall back to os.UserHomeDir (USERPROFILE) and
+// then to os.TempDir. Without the fallbacks every derived path would become
+// relative to the working directory and config would be written next to
+// whatever directory the tool happens to run in.
+func homeDir() string {
+	if dir := os.Getenv("HOME"); dir != "" {
+		return dir
+	}
+	if dir, err := os.UserHomeDir(); err == nil && dir != "" {
+		return dir
+	}
+	return os.TempDir()
+}
+
 func BaseDir(envKey, defaultSubdir string) string {
 	if dir := os.Getenv(envKey); dir != "" {
 		return dir
 	}
-	return filepath.Join(os.Getenv("HOME"), defaultSubdir)
+	return filepath.Join(homeDir(), defaultSubdir)
 }
 
 func ConfigDir() string {

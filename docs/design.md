@@ -1,6 +1,6 @@
 # oci-sync 设计文档
 
-> 版本：0.1.0 | 更新时间：2026-04-20
+> 版本：0.7.0 | 更新时间：2026-10-11
 
 ## 1. 项目概述
 
@@ -141,11 +141,17 @@ oci-sync/
 │   ├── label.go                   # label 子命令 (set/unset)
 │   ├── alias.go                   # alias 子命令 (list/add/remove)
 │   ├── recent.go                  # recent 子命令（查看活动历史）
-│   ├── tui.go                     # tui 子命令（全屏分栏管理）
-│   └── utils.go                   # 工具函数（formatBytes）
+│   ├── tui.go                     # tui 子命令：model 状态机与命令派发
+│   ├── tui_view.go                # tui 渲染：View/overlay/布局计算
+│   ├── tui_keys.go                # tui 按键绑定
+│   ├── utils.go                   # 共用工具（formatBytes / label 解析 / 活动记录）
+│   ├── utils_test.go              # label 校验与解析单元测试
+│   ├── shortcut_test.go           # shortcut 引用构造单元测试
+│   └── tui_test.go                # tui 状态机与渲染单元测试
 └── internal/
     ├── config/
-    │   └── config.go              # 配置文件支持
+    │   ├── config.go              # 配置文件支持
+    │   └── config_test.go         # 单元测试
     ├── archive/
     │   ├── archive.go             # tar.gz 打包/解包
     │   └── archive_test.go        # 单元测试
@@ -153,11 +159,14 @@ oci-sync/
     │   ├── crypto.go              # AES-256-GCM 加密/解密
     │   └── crypto_test.go         # 单元测试
     ├── oci/
-    │   └── oci.go                 # OCI push/pull（oras-go v2）
+    │   ├── oci.go                 # OCI push/pull/list（oras-go v2）
+    │   └── oci_test.go            # fanOut 并发单元测试
     ├── cache/
-    │   └── cache.go               # Activity cache 持久化
+    │   ├── cache.go               # Activity cache 持久化
+    │   └── cache_test.go          # 单元测试
     ├── xdg/
-    │   └── xdg.go                 # XDG 目录规范支持
+    │   ├── xdg.go                 # XDG 目录规范支持
+    │   └── xdg_test.go            # 单元测试
     └── version/
     │   └── version.go             # 版本信息
 
@@ -175,7 +184,9 @@ oci-sync/
 **实现细节**
 - 使用标准库 `archive/tar` + `compress/gzip`，无额外依赖
 - 目录打包保留完整的子目录结构，以 `filepath.Walk` 遍历
-- 解包时进行路径穿越检查（Path Traversal Security）
+- tar 成员名统一用 `/` 分隔（`filepath.ToSlash`）：`filepath.Join` 在 Windows 上产生 `\`，会导致跨平台 push → pull 时目录结构塌陷为扁平文件名
+- 符号链接按目标内容打包为普通文件（Unpack 只落地普通文件与目录，若存链接目标则 round-trip 后全变空文件）；指向目录的链接跳过，避免子树重复
+- 解包时进行路径穿越检查（Path Traversal Security）；以 `/` 开头的成员名会被 `filepath.Join` 折入目标目录内部，属于安全收敛而非拒绝
 
 ### 4.2 `internal/crypto` — 加密/解密
 
@@ -210,6 +221,11 @@ random nonce ──────────────────────�
 | `List` | `(ctx, ref string) ([]ArtifactInfo, error)` | 列出远程仓库镜像记录（支持 Registry/Repo）|
 | `UpdateAnnotations` | `(ctx, ref string, updates map[string]string, removeKeys []string) error` | 更新 manifest annotations（set/unset labels）|
 
+`List` 在 registry 级会为每个仓库、每个 tag 发起 `Resolve` + `Fetch` 两次往返，串行执行
+时是 N+1 瓶颈。`fanOut` 以 8 路为上限并发执行并**按输入下标归位**，因此输出顺序稳定可复现；
+部分条目失败时仍返回成功的结果，只有全军覆没才返回聚合错误（`errors.Join`），
+这样单个损坏的仓库不会让整次列举失败。
+
 
 **OCI Artifact 结构**
 - 使用标准 OCI Image Manifest 格式，`schemaVersion: 2`
@@ -222,8 +238,12 @@ random nonce ──────────────────────�
 | Annotation Key | 值 | 说明 |
 |-----------------|-----|------|
 | `io.oci-sync.encrypted` | `"true"` / `"false"` | 是否加密 |
-| `io.oci-sync.version` | `"0.1.0"` | 工具版本 |
+| `io.oci-sync.version` | `"0.7.0"` | 工具版本（`internal/version`）|
 | 用户自定义 | 任意字符串 | 通过 `--label key=value` 设置 |
+
+`io.oci-sync.*` 前缀为系统保留命名空间：`label set` / `label unset` 会拒绝此类 key，
+`Push` / `UpdateAnnotations` 也会在写入后强制回填系统注解。因此加密标记与版本号
+无法通过标签被篡改或删除。
 
 **数据结构 `ArtifactInfo`**
 - `FullName`: 镜像全名，格式为 `<registry>/<repo>:<tag>`（用于 JSON/YAML 输出）
@@ -267,6 +287,8 @@ type Activity struct {
 - 默认：`~/.cache/oci-sync/activity.json`
 - 支持 `XDG_CACHE_HOME` 环境变量覆盖
 
+`Save` 先写同目录临时文件再 `os.Rename` 原子替换：直接 `WriteFile` 在进程中途退出时会留下截断的 JSON，导致之后每次 `Load` 都失败。`GetStats` 返回的 `Recent` 是拷贝而非切片别名，避免排序时改写到已加载数据。
+
 ### 4.5 `internal/xdg` — XDG 目录规范
 
 | 函数 | 签名 | 说明 |
@@ -275,6 +297,12 @@ type Activity struct {
 | `CacheDir` | `() string` | 缓存目录（`$XDG_CACHE_HOME` 或 `~/.cache`） |
 | `DataDir` | `() string` | 数据目录（`$XDG_DATA_HOME` 或 `~/.local/share`） |
 
+home 目录解析顺序：`$HOME` → `os.UserHomeDir()`（Windows 的 `USERPROFILE`）→ `os.TempDir()`。
+Windows 默认不设置 `HOME`，缺少回退会让上述目录退化为相对路径，配置与缓存将被写到当前工作目录。
+
+配置查找顺序为当前目录 → XDG 配置目录。`alias add` / `alias remove` 写回时遵循同一顺序：
+若已有生效的配置文件则原地改写，否则创建到 XDG 位置——读写路径不一致会导致别名写入后无法被读到。
+
 ---
 
 ## 5. 依赖列表
@@ -282,12 +310,20 @@ type Activity struct {
 | 包 | 版本 | 用途 |
 |----|------|------|
 | `github.com/spf13/cobra` | v1.10.2 | CLI 框架 |
-| `gopkg.in/yaml.v3` | v3.x | 配置文件解析（替代 viper）|
-| `oras.land/oras-go/v2` | v2.6.0 | OCI push/pull |
+| `oras.land/oras-go/v2` | v2.6.0 | OCI push/pull/list/delete |
 | `github.com/opencontainers/image-spec` | v1.1.1 | OCI 数据结构 |
 | `github.com/opencontainers/go-digest` | v1.0.0 | 内容摘要计算 |
-| `charm.land/log/v2` | v2 | 彩色日志输出 |
+| `github.com/pterm/pterm` | v0.12.83 | 表格格式化输出 |
+| `charm.land/log/v2` | v2.0.0 | 彩色日志输出 |
+| `github.com/charmbracelet/bubbletea` | v1.3.10 | TUI 框架 |
+| `github.com/charmbracelet/bubbles` | v1.0.0 | TUI 组件（input/spinner/help/key）|
+| `github.com/charmbracelet/lipgloss` | v1.1.0 | TUI 样式与布局 |
+| `github.com/mattn/go-runewidth` | v0.0.23 | 终端显示宽度（CJK 对齐）|
 | `golang.org/x/crypto` | v0.49.0 | scrypt KDF |
+| `gopkg.in/yaml.v3` | v3.0.1 | 配置文件解析 |
+| `github.com/stretchr/testify` | v1.11.1 | 测试断言 |
+
+Go 工具链：`go 1.25.8`。
 
 ---
 
@@ -528,6 +564,6 @@ oci-sync tui
 
 - **`--insecure`**：支持 HTTP（非 TLS）仓库
 - **`--platform`**：多架构 manifest list 支持
-- **进度条**：大文件上传/下载显示进度
+- **流式传输**：当前 push/pull 全量缓冲进内存，大文件受限于可用内存；改为流式可同时支持断点续传
 - **增量同步**：对比 digest 跳过未变更内容
 - **多文件 layer**：多个 layer 对应多个文件，支持细粒度更新

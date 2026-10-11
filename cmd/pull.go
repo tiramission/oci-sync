@@ -104,7 +104,7 @@ func runPull(ctx context.Context, remotePath, localPath, passphrase string, onPr
 
 	log.Info("Pull successful ✓", "dest", localPath)
 
-	cache.AddActivity(cache.Activity{
+	recordActivity(cache.Activity{
 		Type:      cache.ActivityPull,
 		Timestamp: time.Now(),
 		RemoteRef: remotePath,

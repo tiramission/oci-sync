@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"charm.land/log/v2"
@@ -41,12 +40,9 @@ Example: registry-1.docker.io/myuser/myrepo:latest`,
 }
 
 func runPush(ctx context.Context, localPath, remotePath, passphrase string, labels []string) error {
-	labelMap := make(map[string]string)
-	for _, l := range labels {
-		parts := strings.SplitN(l, "=", 2)
-		if len(parts) >= 2 {
-			labelMap[parts[0]] = parts[1]
-		}
+	labelMap, err := parseLabels(labels, false)
+	if err != nil {
+		return err
 	}
 
 	log.Info("Packing files...", "path", localPath)
@@ -73,7 +69,7 @@ func runPush(ctx context.Context, localPath, remotePath, passphrase string, labe
 
 	log.Info("Push successful ✓", "ref", remotePath)
 
-	cache.AddActivity(cache.Activity{
+	recordActivity(cache.Activity{
 		Type:      cache.ActivityPush,
 		Timestamp: time.Now(),
 		RemoteRef: remotePath,

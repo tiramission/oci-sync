@@ -49,12 +49,34 @@ func packDir(tw *tar.Writer, srcDir, baseDir string) error {
 			return err
 		}
 
+		// Follow symlinks: they are packed as ordinary files holding the
+		// target's content. Unpack only materialises regular files and
+		// directories, so storing link targets would make a round trip turn
+		// every link into an empty file. tar.FileInfoHeader would also size
+		// the entry to the length of the link path while the body is the
+		// target content, which fails with "write too long".
+		if info.Mode()&os.ModeSymlink != 0 {
+			resolved, err := os.Stat(path)
+			if err != nil {
+				return fmt.Errorf("stat symlink %s: %w", path, err)
+			}
+			if resolved.IsDir() {
+				// A link to a directory would duplicate the subtree under a
+				// second name; skip it rather than silently nesting content.
+				return nil
+			}
+			info = resolved
+		}
+
 		// compute relative header name under baseDir
 		rel, err := filepath.Rel(srcDir, path)
 		if err != nil {
 			return err
 		}
-		headerName := filepath.Join(baseDir, rel)
+		// Tar member names are always slash-separated, regardless of the host
+		// OS. filepath.Join yields backslashes on Windows, which would collapse
+		// the whole tree into single flat names when unpacked elsewhere.
+		headerName := filepath.ToSlash(filepath.Join(baseDir, rel))
 		if info.IsDir() {
 			headerName += "/"
 		}
@@ -73,17 +95,23 @@ func packDir(tw *tar.Writer, srcDir, baseDir string) error {
 			return nil
 		}
 
-		f, err := os.Open(path)
-		if err != nil {
-			return fmt.Errorf("open %s: %w", path, err)
-		}
-		defer f.Close()
-
-		if _, err := io.Copy(tw, f); err != nil {
-			return fmt.Errorf("write %s to tar: %w", path, err)
-		}
-		return nil
+		return writeFileTo(tw, path)
 	})
+}
+
+// writeFileTo appends the contents of src to tw. It closes src before
+// returning so callers packing large trees do not accumulate open handles.
+func writeFileTo(tw *tar.Writer, src string) error {
+	f, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", src, err)
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(tw, f); err != nil {
+		return fmt.Errorf("write %s to tar: %w", src, err)
+	}
+	return nil
 }
 
 func packFile(tw *tar.Writer, srcFile, name string) error {
@@ -96,22 +124,13 @@ func packFile(tw *tar.Writer, srcFile, name string) error {
 	if err != nil {
 		return fmt.Errorf("create tar header: %w", err)
 	}
-	hdr.Name = name
+	hdr.Name = filepath.ToSlash(name)
 
 	if err := tw.WriteHeader(hdr); err != nil {
 		return fmt.Errorf("write tar header: %w", err)
 	}
 
-	f, err := os.Open(srcFile)
-	if err != nil {
-		return fmt.Errorf("open %s: %w", srcFile, err)
-	}
-	defer f.Close()
-
-	if _, err := io.Copy(tw, f); err != nil {
-		return fmt.Errorf("copy file content: %w", err)
-	}
-	return nil
+	return writeFileTo(tw, srcFile)
 }
 
 // Unpack extracts the tar.gz archive bytes into destPath.
@@ -167,7 +186,10 @@ func Unpack(data []byte, destPath string) error {
 			}
 			f.Close()
 		default:
-			// skip unsupported types (symlinks, devices, etc.)
+			// Skip links, devices, fifos. Pack never emits them (symlinks are
+			// followed and stored as regular files), so this only guards
+			// against archives from other producers — materialising a link
+			// here would let an archive write outside destPath.
 		}
 	}
 	return nil

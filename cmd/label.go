@@ -3,7 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"strings"
+	"sort"
 	"time"
 
 	"charm.land/log/v2"
@@ -45,13 +45,12 @@ Examples:
 }
 
 func runLabelSet(ctx context.Context, remote string, labels []string) error {
-	updates := make(map[string]string)
-	for _, l := range labels {
-		parts := strings.SplitN(l, "=", 2)
-		if len(parts) < 2 {
-			return fmt.Errorf("invalid label format %q, expected key=value", l)
-		}
-		updates[parts[0]] = parts[1]
+	updates, err := parseLabels(labels, true)
+	if err != nil {
+		return err
+	}
+	if len(updates) == 0 {
+		return fmt.Errorf("at least one label in key=value format required")
 	}
 
 	log.Info("Updating labels...", "ref", remote)
@@ -65,8 +64,9 @@ func runLabelSet(ctx context.Context, remote string, labels []string) error {
 	for k, v := range updates {
 		labelStrs = append(labelStrs, k+"="+v)
 	}
+	sort.Strings(labelStrs)
 
-	cache.AddActivity(cache.Activity{
+	recordActivity(cache.Activity{
 		Type:      cache.ActivityLabel,
 		Timestamp: time.Now(),
 		RemoteRef: remote,
@@ -102,6 +102,11 @@ func runLabelUnset(ctx context.Context, remote string, keys []string) error {
 	if len(keys) == 0 {
 		return fmt.Errorf("at least one label key required")
 	}
+	for _, k := range keys {
+		if err := rejectSystemLabel(k); err != nil {
+			return err
+		}
+	}
 
 	log.Info("Removing labels...", "ref", remote, "keys", keys)
 	if err := oci.UpdateAnnotations(ctx, remote, nil, keys); err != nil {
@@ -110,7 +115,7 @@ func runLabelUnset(ctx context.Context, remote string, keys []string) error {
 
 	log.Info("Labels removed ✓", "ref", remote)
 
-	cache.AddActivity(cache.Activity{
+	recordActivity(cache.Activity{
 		Type:      cache.ActivityLabel,
 		Timestamp: time.Now(),
 		RemoteRef: remote,

@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"charm.land/log/v2"
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 	"github.com/tiramission/oci-sync/internal/config"
+	"github.com/tiramission/oci-sync/internal/xdg"
 	"gopkg.in/yaml.v3"
 )
 
@@ -120,11 +120,11 @@ func runAliasAdd(ctx context.Context, name, repo string) error {
 	cfg.Shortcuts[name] = config.Shortcut{Repo: repo}
 
 	if err := saveConfig(cfgPath, cfg); err != nil {
-		log.Warn("cannot write config file", "path", cfgPath, "error", err)
-		return nil
+		return fmt.Errorf("cannot write config file %s: %w", cfgPath, err)
 	}
 
 	fmt.Printf("Shortcut %q added with repo %q\n", name, repo)
+	fmt.Printf("  Config: %s\n", cfgPath)
 	return nil
 }
 
@@ -161,17 +161,25 @@ func runAliasRemove(ctx context.Context, name string) error {
 	delete(cfg.Shortcuts, name)
 
 	if err := saveConfig(cfgPath, cfg); err != nil {
-		log.Warn("cannot write config file", "path", cfgPath, "error", err)
-		return nil
+		return fmt.Errorf("cannot write config file %s: %w", cfgPath, err)
 	}
 
 	fmt.Printf("Shortcut %q removed\n", name)
+	fmt.Printf("  Config: %s\n", cfgPath)
 	return nil
 }
 
+// getConfigPath returns the config file to write shortcuts into. When a
+// config file is already in use it is rewritten in place, so an existing
+// project-local ./oci-sync.yaml stays authoritative; otherwise the XDG
+// location is used. This mirrors the lookup order in config.InitConfig —
+// writing anywhere else would silently fork the config in two.
 func getConfigPath() (string, error) {
-	configDir := filepath.Join(os.Getenv("HOME"), ".config", "oci-sync")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if used := config.ConfigFileUsed(); used != "" {
+		return used, nil
+	}
+	configDir := filepath.Join(xdg.ConfigDir(), "oci-sync")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return "", fmt.Errorf("create config dir: %w", err)
 	}
 	return filepath.Join(configDir, "oci-sync.yaml"), nil
@@ -199,7 +207,7 @@ func saveConfig(path string, cfg *config.Config) error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
 	return nil

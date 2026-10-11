@@ -82,8 +82,29 @@ func Save(cache *ActivityCache) error {
 		return fmt.Errorf("marshal cache: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write cache: %w", err)
+	// Write to a temp file in the same directory, then rename. A plain
+	// WriteFile can leave a truncated file if the process dies mid-write,
+	// and every later Load would then fail on the corrupt JSON.
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, CacheFileName+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp cache file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename succeeded
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp cache file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp cache file: %w", err)
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		return fmt.Errorf("chmod temp cache file: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replace cache file: %w", err)
 	}
 
 	return nil
@@ -151,15 +172,19 @@ func GetStats(limit int) (*ActivityStats, error) {
 		stats.ByType[string(a.Type)]++
 	}
 
-	recent := cache.Activities
+	// Copy before sorting: recent aliases cache.Activities, and sorting it in
+	// place would reorder the caller's slice — and only its first limit
+	// elements, leaving the rest stale.
+	recent := make([]Activity, len(cache.Activities))
+	copy(recent, cache.Activities)
+	sort.SliceStable(recent, func(i, j int) bool {
+		return recent[i].Timestamp.After(recent[j].Timestamp)
+	})
+
 	if limit > 0 && limit < len(recent) {
 		recent = recent[:limit]
 	}
 	stats.Recent = recent
-
-	sort.Slice(stats.Recent, func(i, j int) bool {
-		return stats.Recent[i].Timestamp.After(stats.Recent[j].Timestamp)
-	})
 
 	return stats, nil
 }

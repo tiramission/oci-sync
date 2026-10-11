@@ -6,10 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
@@ -27,6 +30,10 @@ const (
 	AnnotationEncrypted = "io.oci-sync.encrypted"
 	AnnotationVersion   = "io.oci-sync.version"
 	mediaTypeLayer      = "application/octet-stream"
+
+	// systemAnnotationPrefix marks annotations owned by oci-sync. User labels
+	// never carry it, so it also separates labels from metadata in List.
+	systemAnnotationPrefix = "io.oci-sync."
 )
 
 type ociManifest struct {
@@ -57,7 +64,11 @@ func Push(ctx context.Context, data []byte, ref string, encrypted bool, labels m
 	} else {
 		annotations[AnnotationEncrypted] = "false"
 	}
+	// User labels go in first and the system keys overwrite them, so a label
+	// can never claim a different encryption state or version than reality.
 	maps.Copy(annotations, labels)
+	annotations[AnnotationVersion] = version.Version
+	annotations[AnnotationEncrypted] = strconv.FormatBool(encrypted)
 
 	configBytes := emptyConfigBytes()
 	configDesc := ocispec.Descriptor{
@@ -181,18 +192,15 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
-func newRepository(ctx context.Context, ref string) (*remote.Repository, error) {
-	repo, err := remote.NewRepository(ref)
-	if err != nil {
-		return nil, fmt.Errorf("parse reference %q: %w", ref, err)
-	}
-
+// newAuthClient builds the auth client for host. Credentials from the
+// oci-sync config win; otherwise the Docker credential store is used, so
+// `docker login` keeps working.
+func newAuthClient(host string) (*auth.Client, error) {
 	authClient := &auth.Client{
 		Client: retry.DefaultClient,
 		Cache:  auth.DefaultCache,
 	}
 
-	host := repo.Reference.Host()
 	if regAuth, ok := config.GetRegistryAuth(host); ok && regAuth.Username != "" && regAuth.Password != "" {
 		authClient.Credential = auth.CredentialFunc(func(ctx context.Context, reg string) (auth.Credential, error) {
 			return auth.Credential{
@@ -200,16 +208,29 @@ func newRepository(ctx context.Context, ref string) (*remote.Repository, error) 
 				Password: regAuth.Password,
 			}, nil
 		})
-	} else {
-		credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{
-			AllowPlaintextPut: false,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("load docker credential store: %w", err)
-		}
-		authClient.Credential = credentials.Credential(credStore)
+		return authClient, nil
 	}
 
+	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{
+		AllowPlaintextPut: false,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load docker credential store: %w", err)
+	}
+	authClient.Credential = credentials.Credential(credStore)
+	return authClient, nil
+}
+
+func newRepository(ctx context.Context, ref string) (*remote.Repository, error) {
+	repo, err := remote.NewRepository(ref)
+	if err != nil {
+		return nil, fmt.Errorf("parse reference %q: %w", ref, err)
+	}
+
+	authClient, err := newAuthClient(repo.Reference.Host())
+	if err != nil {
+		return nil, err
+	}
 	repo.Client = authClient
 
 	return repo, nil
@@ -263,6 +284,7 @@ func UpdateAnnotations(ctx context.Context, ref string, updates map[string]strin
 	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
 		return fmt.Errorf("unmarshal manifest: %w", err)
 	}
+	encrypted := manifest.Annotations[AnnotationEncrypted] == "true"
 
 	if manifest.Annotations == nil {
 		manifest.Annotations = make(map[string]string)
@@ -271,6 +293,13 @@ func UpdateAnnotations(ctx context.Context, ref string, updates map[string]strin
 	maps.Copy(manifest.Annotations, updates)
 	for _, k := range removeKeys {
 		delete(manifest.Annotations, k)
+	}
+	// System annotations are authoritative and survive every label edit:
+	// rewriting the encrypted flag would make pull skip decryption, and
+	// dropping the version would hide the artifact from List.
+	manifest.Annotations[AnnotationEncrypted] = strconv.FormatBool(encrypted)
+	if v := manifest.Annotations[AnnotationVersion]; v == "" {
+		manifest.Annotations[AnnotationVersion] = version.Version
 	}
 
 	newManifestBytes, err := json.Marshal(manifest)
@@ -306,6 +335,13 @@ type ArtifactInfo struct {
 	Labels    map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
 }
 
+// listConcurrency bounds in-flight registry requests. Registries rate-limit
+// aggressively, so this trades a little speed for not getting throttled.
+const listConcurrency = 8
+
+// List returns every oci-sync artifact under ref. A ref containing a "/"
+// is treated as a single repository; a bare host lists every repository the
+// registry exposes.
 func List(ctx context.Context, ref string) ([]ArtifactInfo, error) {
 	if strings.Contains(ref, "/") {
 		registry, _ := splitRegistry(ref)
@@ -321,82 +357,144 @@ func List(ctx context.Context, ref string) ([]ArtifactInfo, error) {
 		return nil, err
 	}
 
-	var results []ArtifactInfo
-	err = reg.Repositories(ctx, "", func(repos []string) error {
-		for _, repoName := range repos {
-			fullRepoRef := ref + "/" + repoName
-			repoObj, err := newRepository(ctx, fullRepoRef)
-			if err != nil {
-				continue
-			}
-			infos, err := listRepoTags(ctx, ref, repoObj)
-			if err == nil {
-				results = append(results, infos...)
-			}
-		}
+	// Collect the repository names first, then fan out: doing the fan-out
+	// inside the pagination callback would serialise every repo behind one
+	// slow listing.
+	var repoNames []string
+	if err := reg.Repositories(ctx, "", func(repos []string) error {
+		repoNames = append(repoNames, repos...)
 		return nil
-	})
-
-	if err != nil {
+	}); err != nil {
 		return nil, fmt.Errorf("list repositories failed: %w", err)
 	}
 
+	results, errs := fanOut(len(repoNames), func(i int) ([]ArtifactInfo, error) {
+		repoObj, err := newRepository(ctx, ref+"/"+repoNames[i])
+		if err != nil {
+			return nil, err
+		}
+		return listRepoTags(ctx, ref, repoObj)
+	})
+
+	if len(results) == 0 && len(errs) > 0 {
+		return nil, fmt.Errorf("list repositories failed: %w", errors.Join(errs...))
+	}
 	return results, nil
 }
 
+// listRepoTags resolves every tag of one repository concurrently. Each tag
+// needs a Resolve followed by a Fetch, so a serial walk costs two round
+// trips per tag.
 func listRepoTags(ctx context.Context, registry string, repo *remote.Repository) ([]ArtifactInfo, error) {
-	var results []ArtifactInfo
-	repoName := repo.Reference.Repository
-
-	err := repo.Tags(ctx, "", func(tags []string) error {
-		for _, tag := range tags {
-			desc, err := repo.Resolve(ctx, tag)
-			if err != nil {
-				continue
-			}
-
-			rc, err := repo.Fetch(ctx, desc)
-			if err != nil {
-				continue
-			}
-			data, err := io.ReadAll(rc)
-			rc.Close()
-			if err != nil {
-				continue
-			}
-
-			var manifest ocispec.Manifest
-			if err := json.Unmarshal(data, &manifest); err != nil {
-				continue
-			}
-
-			if val, ok := manifest.Annotations[AnnotationVersion]; ok {
-				encStr := manifest.Annotations[AnnotationEncrypted]
-				var size int64
-				if len(manifest.Layers) > 0 {
-					size = manifest.Layers[0].Size
-				}
-				labels := make(map[string]string)
-				for k, v := range manifest.Annotations {
-					if !strings.HasPrefix(k, "io.oci-sync.") {
-						labels[k] = v
-					}
-				}
-				results = append(results, ArtifactInfo{
-					FullName:  registry + "/" + repoName + ":" + tag,
-					Repo:      repoName,
-					Tag:       tag,
-					Digest:    desc.Digest.String(),
-					Encrypted: encStr == "true",
-					Version:   val,
-					Size:      size,
-					Labels:    labels,
-				})
-			}
-		}
+	var tags []string
+	if err := repo.Tags(ctx, "", func(page []string) error {
+		tags = append(tags, page...)
 		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	repoName := repo.Reference.Repository
+	results, errs := fanOut(len(tags), func(i int) ([]ArtifactInfo, error) {
+		info, err := artifactInfo(ctx, registry, repoName, repo, tags[i])
+		if err != nil || info == nil {
+			return nil, err
+		}
+		return []ArtifactInfo{*info}, nil
 	})
-	return results, err
+
+	if len(results) == 0 && len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return results, nil
+}
+
+// artifactInfo returns the ArtifactInfo for one tag, or nil when the tag is
+// simply not an oci-sync artifact (a foreign image, or a manifest we cannot
+// parse). Those are normal, not errors.
+func artifactInfo(ctx context.Context, registry, repoName string, repo *remote.Repository, tag string) (*ArtifactInfo, error) {
+	desc, err := repo.Resolve(ctx, tag)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s:%s: %w", repoName, tag, err)
+	}
+
+	rc, err := repo.Fetch(ctx, desc)
+	if err != nil {
+		return nil, fmt.Errorf("fetch %s:%s: %w", repoName, tag, err)
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, fmt.Errorf("read %s:%s: %w", repoName, tag, err)
+	}
+
+	var manifest ocispec.Manifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		// Not a manifest we understand; treat as a foreign artifact.
+		return nil, nil
+	}
+
+	val, ok := manifest.Annotations[AnnotationVersion]
+	if !ok {
+		return nil, nil // not pushed by oci-sync
+	}
+
+	var size int64
+	if len(manifest.Layers) > 0 {
+		size = manifest.Layers[0].Size
+	}
+	labels := make(map[string]string)
+	for k, v := range manifest.Annotations {
+		if !strings.HasPrefix(k, systemAnnotationPrefix) {
+			labels[k] = v
+		}
+	}
+
+	return &ArtifactInfo{
+		FullName:  registry + "/" + repoName + ":" + tag,
+		Repo:      repoName,
+		Tag:       tag,
+		Digest:    desc.Digest.String(),
+		Encrypted: manifest.Annotations[AnnotationEncrypted] == "true",
+		Version:   val,
+		Size:      size,
+		Labels:    labels,
+	}, nil
+}
+
+// fanOut runs fn for indexes [0,n) with bounded concurrency and returns the
+// concatenated results in input order plus every non-nil error. Callers
+// decide whether a partial result is usable.
+func fanOut(n int, fn func(i int) ([]ArtifactInfo, error)) ([]ArtifactInfo, []error) {
+	if n == 0 {
+		return nil, nil
+	}
+
+	out := make([][]ArtifactInfo, n)
+	errs := make([]error, n)
+
+	sem := make(chan struct{}, listConcurrency)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			out[i], errs[i] = fn(i)
+		}()
+	}
+	wg.Wait()
+
+	var results []ArtifactInfo
+	var kept []error
+	for i := range n {
+		results = append(results, out[i]...)
+		if errs[i] != nil {
+			kept = append(kept, errs[i])
+		}
+	}
+	return results, kept
 }
 
 func splitRegistry(ref string) (registry, repo string) {
@@ -413,28 +511,10 @@ func newRegistry(ctx context.Context, host string) (*remote.Registry, error) {
 		return nil, fmt.Errorf("parse registry %q: %w", host, err)
 	}
 
-	authClient := &auth.Client{
-		Client: retry.DefaultClient,
-		Cache:  auth.DefaultCache,
+	authClient, err := newAuthClient(host)
+	if err != nil {
+		return nil, err
 	}
-
-	if regAuth, ok := config.GetRegistryAuth(host); ok && regAuth.Username != "" && regAuth.Password != "" {
-		authClient.Credential = auth.CredentialFunc(func(ctx context.Context, reg string) (auth.Credential, error) {
-			return auth.Credential{
-				Username: regAuth.Username,
-				Password: regAuth.Password,
-			}, nil
-		})
-	} else {
-		credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{
-			AllowPlaintextPut: false,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("load docker credential store: %w", err)
-		}
-		authClient.Credential = credentials.Credential(credStore)
-	}
-
 	reg.Client = authClient
 
 	return reg, nil
