@@ -127,7 +127,14 @@ go list -m -f '{{.Dir}}' github.com/egoist/mygo
 
 **布局：`Fill()` 会同时吃掉宽和高。** 在 `Column` 里给某个子元素 `Fill()`，它会占满父容器的高度并把自己的内容居中，从而把后续兄弟元素顶出窗口——表现为按钮 `tt.Find()` 得到 `h=0`、点在视口外。toolbar 这类「高度自适应、只占满宽度」的行要用 `FillWidth()`；真正要吃剩余空间的用 `Grow(1)` + `FillHeight()`。
 
-**验证**：`CGO_ENABLED=0 go test ./...`，UI 行为用 `ui.NewTester` 断言。两个约束：
+**验证**：`mygo vet .` 与 `CGO_ENABLED=0 go test ./...`，UI 行为用 `ui.NewTester` 断言。
+
+`mygo vet` 除了跑 `go vet`，还用类型信息检查 **MyGo build 值的生命周期**——
+把 `ui.Element` / `ui.Context` / `ui.ListRow` 等存进结构体字段、包级变量，或传进 goroutine，都会报错。
+这些正是 GUI 里最难靠肉眼发现的一类 bug（下一帧就失效），所以是硬门禁。它不是 `go tool`，
+本机也未必预装，需要时 `GOBIN="$HOME/go/bin" go install github.com/egoist/mygo/cmd/mygo@v0.4.2`。
+
+两个约束：
 
 - 一个 `ListState` 只能被一个 `Tester`（=一个窗口）渲染，第二个 Tester 用同一个会 panic。所以「渲染→点击→再断言」必须在**同一个** tester 里做。
 - 布局问题用 `tt.Find(text)` 拿 `Rect` 定位：`h=0` 或 `y + h` 超出窗口高度就说明元素被挤出视口、点不到。最小窗口 720×420 是布局下限，弹窗内每个字段都要在该尺寸下断言。
@@ -141,6 +148,23 @@ go list -m -f '{{.Dir}}' github.com/egoist/mygo
 
 **口令失焦必须掩码**：`bubbles/textinput` 的 `EchoPassword` 仍然按字符数画点，会泄露口令长度。
 失焦行统一画固定长度的掩码符，聚焦行也不画 input 视图（否则用户看不到输入位置）。
+
+**渲染高度必须等于窗口高度**：气泡/边框的 `Height()` 只算**内容**，
+但面板自己还画上下两条边框，而 `View()` 外面又拼了 header 1 行 + footer 1 行。
+这四行不在窗口的高度预算里，漏算的表现是终端整体滚动——header 滚出顶部、footer 被切一半，
+看起来像渲染坏了而不是像超了两行。`cmd/tui_view.go` 的 `paneHeight()` 统一扣掉这四行。
+
+**宽度断言查不出超高**：超高的每一行仍然在宽度限制内，所以只量宽度的尺寸测试会一路绿灯。
+改布局后必须断言渲染结果的**行数**等于窗口高度（`TestRenderedRowsMatchTheWindowHeight`）。
+
+**弹窗要限高，且 hint 最后才丢**：lipgloss 的 `MaxHeight` 卡的是**整个框含边框**，
+而 `Padding` 在 `MaxHeight` **之前**生效，所以正文可用高度 = 窗口 − 2 边框 − 2 padding。
+用 `Height()` 会把矮弹窗撑到满窗，留下一个大空框；从尾部裁正文，
+`enter/esc: close` 这类提示行永远保留——它写着怎么关闭，丢了就没路了。
+测试必须用**窄宽度**（48 列）跑：80 列时最宽的弹窗本来就放得下，无论实现怎么写都会通过。
+
+**字段标签要留间隙**：标签列按最长键 +1 补齐。`padRight` 在字符串宽度**正好等于**目标宽度时不补空格，
+而 `repository` 正好 10 字符——按 10 补齐会让详情页第一个字段的键和值粘在一起。
 
 **footer 要钳宽度**：`bubbles/help` 的 `ShortHelpView` 会在超过 `help.Width` 时**自行截断**并以省略号收尾。
 所以「这行放得下吗」只能问渲染结果里是否还留着每个绑定的描述，量字符串宽度量不出来——
