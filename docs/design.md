@@ -753,10 +753,19 @@ CLI 同名命令的等价实现（GUI 直接复用 `runPush` / `runPull` / `runD
 
 ---
 
+## 7.1 发版
+
+推送 `v*` tag 触发 `.github/workflows/release.yml`，**产物一律由 CI 生成**。完整步骤、
+`vendorHash` 失效的排查、容器化 nix 验证的坑，见 `AGENTS.md` 的「发版流程」一节。
+
+版本号出现在三个地方，改一处不够：`internal/version/version.go`、`nix/package.nix`、
+本文档头部与 `io.oci-sync.version` 示例。
+
+---
+
 ## 8. 后续扩展方向
 
 - **`--insecure`**：支持 HTTP（非 TLS）仓库
 - **`--platform`**：多架构 manifest list 支持
-- **流式传输**：当前 push/pull 全量缓冲进内存，大文件受限于可用内存；改为流式可同时支持断点续传
 - **增量同步**：对比 digest 跳过未变更内容
 - **多文件 layer**：多个 layer 对应多个文件，支持细粒度更新

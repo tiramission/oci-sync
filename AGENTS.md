@@ -22,17 +22,75 @@ AI 绝对不能自动执行以下操作，除非用户明确、清晰地用中�
 
 **提交前验证（必须全部通过）：**
 ```bash
-go test ./...
-go build ./...
+CGO_ENABLED=0 go build ./...
+go vet ./...
+go tool mygo vet.                             # MyGo build 值生命周期，见 GUI 章节
+RUNEWIDTH_EASTASIAN=0 go test -count=1 ./... # TUI 布局随 locale 变，两种都要跑
+RUNEWIDTH_EASTASIAN=1 go test -count=1 ./...
 git add -A           # nix build 前必须暂存文件
 nix build
 ```
+
+## 🚀 发版流程
+
+推送 `v*` tag 即触发 `.github/workflows/release.yml`：跑前置验证 → 交叉编译 5 个平台 → 建 GitHub Release。
+**发布产物由 CI 生成，本地不手动构建上传。**
+
+```bash
+# 1. 改版本号（三个文件，缺一不可）
+#    internal/version/version.go   var Version = "0.8.0"       # 无 v 前缀
+#    nix/package.nix               version = "0.8.0";          # vendorHash 见下
+#    docs/design.md                头部版本行 + io.oci-sync.version 示例
+
+# 2. 验证（顺序不能省，见下方「发版前必须验证」）
+go build ./... && go vet ./... && go tool mygo vet .
+RUNEWIDTH_EASTASIAN=0 go test -count=1 ./...
+RUNEWIDTH_EASTASIAN=1 go test -count=1 ./...
+
+# 3. 提交、推送、打 annotated tag
+git commit -m "chore: bump version to 0.8.0"
+git push origin main
+git tag -a v0.8.0 -m "版本说明"
+git push origin v0.8.0
+
+# 4. 验证自动构建
+gh run list --limit 1
+gh run watch <run-id> --exit-status
+
+# 5. 重写发布文档（自动生成的只有一行 Full Changelog 链接）
+gh release edit v0.8.0 --notes-file notes.md --title "v0.8.0 — <一句话卖点>"
+```
+
+**版本号不能带 `v` 前缀**：CI 把 tag 去掉 `v` 后注入 ldflags。该字符串同时写入 `io.oci-sync.version`
+annotation，会随产物进入 registry——带前缀会让同一版本在不同来源下不一致。CI 里有一步断言产物
+`--version` 的输出，跑不了本地这关就发。
+
+**`nix/package.nix` 的 `vendorHash` 会因依赖图变化而失效**：症状是
+`error: hash mismatch in fixed-output derivation`。把报错里的 `got:` 值填回去。
+注意**命中 nix 缓存时这个错误不会暴露**——只有版本号或依赖真正变化触发重编译时才看得见。
+
+**发版前必须验证（本机无 nix 时用容器）：**
+```bash
+# PortableGit 会把 -v .:/x 和 -w /x 转成相对路径，必须关掉路径转换并给绝对路径
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' wslc run --rm \
+  -v "$(pwd -W)":/oci-sync -w /oci-sync -v nix:/nix \
+  nixos/nix nix --extra-experimental-features nix-command \
+  --extra-experimental-features flakes build --no-link --print-build-logs
+```
+`nixos/nix` 镜像是 musl，**跑不了 glibc 动态链接的 Linux 产物**——要实机运行产物得用 `ubuntu:24.04`。
+输出别用 `tail` 截断后只看几行就下结论，先落盘再读全文。
+
+**产物验证：**至少实机跑一个平台的 `--version` 确认版本号（Windows 可直接跑；Linux 用 `ubuntu:24.04`
+容器）。macOS 产物只能验证可编译，**能否开窗要靠人工在 Mac 上确认**。
+
+**`gh release edit` 是发布文档的唯一来源**：CI 的 `generate_release_notes` 只产出一行对比链接，
+中文的「新增 / 修复 / 工程 / 安装」四节要手写。
 
 ## 📋 开发命令
 
 **构建和测试工作流：**
 ```bash
-go test ./...                    # 运行单元测试
+CGO_ENABLED=0 go test -count=1 ./... # 运行单元测试（GUI 部分需要 CGO_ENABLED=0）
 go build ./...                   # 构建所有包
 go build -o temps/oci-sync .     # 构建二进制到 temps 目录
 git add -A                       # 暂存所有变更（nix build 前必须）
