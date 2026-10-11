@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
 	"github.com/tiramission/oci-sync/internal/config"
 	"github.com/tiramission/oci-sync/internal/oci"
 )
@@ -205,8 +203,8 @@ func TestDeleteSuccessDismissRefetches(t *testing.T) {
 
 func TestTruncateUsesCellWidth(t *testing.T) {
 	got := truncate("你好世界", 5)
-	if runewidth.StringWidth(got) > 5 {
-		t.Fatalf("truncate must measure cells, got %q width %d", got, runewidth.StringWidth(got))
+	if cellWidth(got) > 5 {
+		t.Fatalf("truncate must measure cells, got %q width %d", got, cellWidth(got))
 	}
 	if !strings.HasSuffix(got, "…") {
 		t.Fatalf("truncated value should end with an ellipsis, got %q", got)
@@ -232,7 +230,7 @@ func TestRenderedLinesFitEverySupportedSize(t *testing.T) {
 			}
 			for name, view := range views {
 				if line := firstOverWideLine(view, size[0]); line != "" {
-					t.Fatalf("size %dx%d state %q has a %d-cell line: %q", size[0], size[1], name, lipgloss.Width(line), line)
+					t.Fatalf("size %dx%d state %q has a %d-cell line: %q", size[0], size[1], name, cellWidth(line), line)
 				}
 			}
 		}
@@ -433,12 +431,82 @@ func TestFooterPointsAtTheKeyTableWhenItHasToDropKeys(t *testing.T) {
 	}
 }
 
-// A footer that fits keeps every binding and drops the pointer, so the
-// hint never appears on a window wide enough not to need it.
+// A footer wide enough for the whole key set drops the pointer, so the hint
+// never appears on a window that does not need it.
+//
+// The width has to be derived from what the bindings actually measure, not
+// hardcoded: twelve bindings need more than 100 columns, so a fixed 100 could
+// only ever assert that the pointer is there, which is the other test's job.
+// Measuring first is what keeps this one honest as bindings are added.
 func TestFooterOmitsThePointerWhenEverythingFits(t *testing.T) {
-	view := withArtifacts(newTestModel()).View()
-	if strings.Contains(view, "more") {
-		t.Fatalf("a 100 column footer should list every key:\n%s", view)
+	m := withArtifacts(newTestModel())
+	all := m.footerBindings()
+	// help.Width = 0 is how fitBindings asks help for an untruncated render, so
+	// this measures the whole key set rather than a width-limited slice of it.
+	wide := m.help
+	wide.Width = 0
+	need := cellWidth(stripANSI(wide.ShortHelpView(all)))
+	m.width = need + 2 // helpLimit allows width-2
+
+	line := stripANSI(m.viewFooter())
+	if strings.Contains(line, "more") {
+		t.Fatalf("a %d column footer fits all %d bindings and should not "+
+			"point at the key table, got:\n%s", m.width, len(all), line)
+	}
+	for _, b := range all {
+		if d := b.Help().Desc; d != "" && !strings.Contains(line, d) {
+			t.Fatalf("footer dropped %q:\n%s", d, line)
+		}
+	}
+}
+
+// The footer was measured in one place and clamped in another, and the two
+// disagreed about East Asian ambiguous characters: "↑", "↓" and "•" are one
+// cell in a western terminal and two in a CJK one, and both lipgloss and
+// go-runewidth pick their answer from the locale. So help called the same
+// footer 90 cells while this file called it 100, and the line either overflowed
+// the window or lost every binding without saying so — the symptom being a
+// footer that read "? …".
+//
+// So the footer must never be cut by the clamp, at any width, under any
+// locale, and the pointer must appear exactly when something was dropped —
+// neither a silent loss nor a pointer to a key table already fully shown.
+func TestFooterIsNeverCutByTheClamp(t *testing.T) {
+	for _, w := range []int{40, 52, 60, 72, 80, 96, 100, 120, 160} {
+		m := withArtifacts(newTestModel())
+		m.width = w
+		all := m.footerBindings()
+
+		line := stripANSI(m.viewFooter())
+		if strings.HasSuffix(line, "…") {
+			t.Errorf("width %d: footer was truncated, so every binding is lost:\n%q", w, line)
+		}
+		if got := cellWidth(line); got > w-2 {
+			t.Errorf("width %d: footer is %d cells, wider than the %d available:\n%q",
+				w, got, w-2, line)
+		}
+
+		// Every binding whose description made it into the line tells the
+		// user which key pressed it; a description with no key beside it is
+		// the truncated-tail failure this test exists to catch.
+		shown := 0
+		for _, b := range all {
+			if strings.Contains(line, b.Help().Desc) {
+				shown++
+			}
+		}
+		hasPointer := strings.Contains(line, "? more")
+		if shown == len(all) && hasPointer {
+			t.Errorf("width %d: all %d bindings fit, so the pointer is noise:\n%q",
+				w, len(all), line)
+		}
+		if shown < len(all) && !hasPointer {
+			t.Errorf("width %d: footer dropped %d of %d bindings with nothing "+
+				"pointing at the key table:\n%q", w, len(all)-shown, len(all), line)
+		}
+		if shown == 0 {
+			t.Errorf("width %d: footer says nothing at all:\n%q", w, line)
+		}
 	}
 }
 
@@ -578,7 +646,7 @@ func TestEmptyRepositoryAndEmptyFilterAreDistinct(t *testing.T) {
 
 func firstOverWideLine(view string, maxW int) string {
 	for _, line := range strings.Split(view, "\n") {
-		if lipgloss.Width(line) > maxW {
+		if cellWidth(line) > maxW {
 			return line
 		}
 	}

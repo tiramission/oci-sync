@@ -129,6 +129,10 @@ go list -m -f '{{.Dir}}' github.com/egoist/mygo
 
 **验证**：`mygo vet .` 与 `CGO_ENABLED=0 go test ./...`，UI 行为用 `ui.NewTester` 断言。
 
+**TUI 布局改动必须跑两遍**：`RUNEWIDTH_EASTASIAN=0` 与 `RUNEWIDTH_EASTASIAN=1` 各一次
+（见下方「宽度只能用 cellWidth」）。终端宽度随 locale 变化，只在一台机器上验证等于没验证——
+本项目已经因此出现过一次「本地全绿、用户机器失败」的 footer 缺陷。
+
 `mygo vet` 除了跑 `go vet`，还用类型信息检查 **MyGo build 值的生命周期**——
 把 `ui.Element` / `ui.Context` / `ui.ListRow` 等存进结构体字段、包级变量，或传进 goroutine，都会报错。
 这些正是 GUI 里最难靠肉眼发现的一类 bug（下一帧就失效），所以是硬门禁。它不是 `go tool`，
@@ -166,11 +170,22 @@ go list -m -f '{{.Dir}}' github.com/egoist/mygo
 **字段标签要留间隙**：标签列按最长键 +1 补齐。`padRight` 在字符串宽度**正好等于**目标宽度时不补空格，
 而 `repository` 正好 10 字符——按 10 补齐会让详情页第一个字段的键和值粘在一起。
 
-**footer 要钳宽度**：`bubbles/help` 的 `ShortHelpView` 会在超过 `help.Width` 时**自行截断**并以省略号收尾。
-所以「这行放得下吗」只能问渲染结果里是否还留着每个绑定的描述，量字符串宽度量不出来——
-被 help 切过的行量出来反而更短，于是标记会被追加到一条已经切过的尾巴上。
-`cmd/tui_view.go` 的 `fitBindings` 从尾部丢绑定直到整行放得下、再补一个指向完整键位表的标记，
-`clampHelp` 兜住最后 2 列。少了标记，footer 会在用户以为「就这些键」时静默少掉一半。
+**宽度只能用 `cellWidth`/`cellCond`，不要用 `lipgloss.Width` 或 `runewidth`**：
+东亚「歧义宽度」字符（`↑` `↓` `•` `→` `…`）在西文终端算 1 列、在 CJK 终端算 2 列，
+而 `lipgloss.Width` 和 `runewidth.DefaultCondition` 都**跟着 locale 走**
+（`RUNEWIDTH_EASTASIAN` 或系统语言）。于是同一个 footer 在 help 里量成 90 列、
+在本文件里量成 100 列：要么撑破窗口让终端滚动，要么被截成 `? …` 把所有键位提示全丢掉，
+而在两种机器上表现还不一样——本地全绿、用户那边失败就是这个。
+`cmd/tui.go` 的 `cellCond` 固定按 1 列算，`cellWidth` 会自己剥 ANSI，
+`place`/`joinVertical` 也是自己实现而非 `lipgloss.Place`/`JoinVertical`——
+组合器也必须用同一把尺，否则前面每段的精确计算会在最后一步被推翻。
+改完布局要在 `RUNEWIDTH_EASTASIAN=0` 和 `=1` 下各跑一遍测试。
+
+**footer 的宽度只在这里判一次**：`bubbles/help` 的 `ShortHelpView` 会按 `help.Width` 自行截断，
+而它内部的宽度是 locale 相关的。所以走 `untruncatingHelp(h)`（`Width = 0`）拿不截断的渲染，
+由 `fitBindings` 用 `cellWidth` 从尾部丢绑定，**丢过东西才补 `? more` 指针**——
+宽度够放下全部键位时指针是多余的（它指向的键位表就在屏幕上）。
+`clampHelp` 只作兜底，正常情况下是 no-op。少了指针，footer 会在用户以为「就这些键」时静默少掉一半。
 
 **焦点用边框粗细，不用颜色**：终端没有半像素边框，设计稿的 1.5px 只能近似成「双线 vs 单线」。
 粗细是余光能捕捉的信号，两个相近紫色之间的换色不是。弹窗/表单接管键盘时两侧都不画焦点。

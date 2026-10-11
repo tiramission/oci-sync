@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 	"github.com/tiramission/oci-sync/internal/config"
@@ -182,6 +183,42 @@ var (
 	stWarn       = lipgloss.NewStyle().Bold(true).Foreground(colWarn)
 )
 
+// cellCond measures terminal cells on this app's terms.
+//
+// East Asian *ambiguous* characters — "↑", "↓", "•", "→", "…" — are width 1
+// in a western terminal and width 2 in a CJK one, and go-runewidth picks
+// between the two from the locale (RUNEWIDTH_EASTASIAN, or the system
+// language). lipgloss picks up the locale too, so a frame laid out on a
+// western machine comes out two cells narrower on a CJK one: a 48 column
+// window renders a 50 cell line, and a footer measured at 90 cells gets cut
+// by a clamp that measures the same line at 100. The overflow shows up as a
+// frame that scrolls, and the tests pass on one machine and fail on another.
+//
+// So the width is pinned rather than inherited. Ambiguous characters count as
+// one cell, which is what the overwhelming majority of terminals do and what
+// every width in this file was written against. A private condition rather
+// than runewidth.DefaultCondition, because lipgloss keeps its own table and
+// rewriting the global one would not hold anyway.
+var cellCond = func() *runewidth.Condition {
+	c := runewidth.NewCondition()
+	c.EastAsianWidth = false
+	c.CreateLUT()
+	return c
+}()
+
+// cellWidth measures a string in terminal cells, under cellCond. Escape
+// sequences are not part of the width, so a styled string can be measured
+// without stripping it first — the header pads with the difference between
+// this and the cell budget, and it measures already-coloured fragments.
+func cellWidth(s string) int {
+	return cellCond.StringWidth(ansi.Strip(s))
+}
+
+// runeCells is cellWidth for a single rune.
+func runeCells(r rune) int {
+	return cellCond.RuneWidth(r)
+}
+
 // truncate cuts s to w display cells, appending an ellipsis. Width is
 // measured in terminal cells so CJK and wide glyphs stay aligned. It must be
 // applied to plain strings, before any styling.
@@ -189,18 +226,18 @@ func truncate(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
-	if runewidth.StringWidth(s) <= w {
+	if cellWidth(s) <= w {
 		return s
 	}
 	tail := "…"
-	budget := w - runewidth.StringWidth(tail)
+	budget := w - cellWidth(tail)
 	if budget < 0 {
 		return truncate(tail, max(w, 0))
 	}
 	var b strings.Builder
 	used := 0
 	for _, r := range s {
-		rw := runewidth.RuneWidth(r)
+		rw := runeCells(r)
 		if used+rw > budget {
 			break
 		}
@@ -211,11 +248,11 @@ func truncate(s string, w int) string {
 }
 
 func padRight(s string, w int) string {
-	return s + strings.Repeat(" ", max(w-runewidth.StringWidth(s), 0))
+	return s + strings.Repeat(" ", max(w-cellWidth(s), 0))
 }
 
 func padLeft(s string, w int) string {
-	return strings.Repeat(" ", max(w-runewidth.StringWidth(s), 0)) + s
+	return strings.Repeat(" ", max(w-cellWidth(s), 0)) + s
 }
 
 type model struct {

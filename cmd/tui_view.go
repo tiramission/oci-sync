@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
 	"github.com/tiramission/oci-sync/internal/oci"
 )
 
@@ -21,14 +21,72 @@ func (m model) View() string {
 		return ""
 	}
 	if m.width < minWidth || m.height < minHeight {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+		return place(m.width, m.height,
 			stWarn.Render(fmt.Sprintf("terminal too small — need at least %d×%d", minWidth, minHeight)))
 	}
 
 	if overlay := m.viewOverlay(); overlay != "" {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+		return place(m.width, m.height, overlay)
 	}
-	return lipgloss.JoinVertical(lipgloss.Top, m.viewHeader(), m.viewPanes(), m.viewFooter())
+	return joinVertical(m.viewHeader(), m.viewPanes(), m.viewFooter())
+}
+
+// place centres a block in a window and pads it out to the full height.
+//
+// It replaces lipgloss.Place because that one measures with lipgloss's own
+// width table, which follows the locale: on a CJK system it counts "↑", "↓"
+// and "•" as two cells, so a block already sized to the window comes back
+// wider than the window and the terminal scrolls. Every width in this file is
+// measured with cellCond, and the compositor has to agree with it or the
+// careful per-part arithmetic is undone at the last step.
+func place(w, h int, content string) string {
+	lines := strings.Split(content, "\n")
+	// Centre within the content's own bounds first, then pad the block to the
+	// window — otherwise a short dialog drifts toward the top-left of the room
+	// its own width gives it.
+	blockW, blockH := 0, len(lines)
+	for _, l := range lines {
+		blockW = max(blockW, cellWidth(l))
+	}
+	for i, l := range lines {
+		lines[i] = padLeft(l, blockW+(w-blockW)/2)
+	}
+	if blockH > h {
+		blockH = h
+		lines = lines[:h]
+	}
+	top, bottom := (h-blockH)/2, h-blockH-(h-blockH)/2
+	out := make([]string, 0, h)
+	for range top {
+		out = append(out, strings.Repeat(" ", w))
+	}
+	out = append(out, lines...)
+	for range bottom {
+		out = append(out, strings.Repeat(" ", w))
+	}
+	return strings.Join(out, "\n")
+}
+
+// joinVertical stacks blocks and pads every line to the widest one, so the
+// frame is a rectangle. Like place, it measures with cellCond rather than
+// lipgloss, for the same reason.
+//
+// It only pads; it never truncates. A line that is already too wide is a bug
+// in the block that produced it, and hiding that here would lose the evidence
+// the width assertions exist to catch.
+func joinVertical(blocks ...string) string {
+	lines := make([]string, 0, 16)
+	width := 0
+	for _, b := range blocks {
+		for _, l := range strings.Split(b, "\n") {
+			lines = append(lines, l)
+			width = max(width, cellWidth(l))
+		}
+	}
+	for i, l := range lines {
+		lines[i] = padRight(l, width)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m model) viewHeader() string {
@@ -55,9 +113,9 @@ func (m model) viewHeader() string {
 	}
 
 	brand := stApp.Render("oci-sync")
-	budget := m.width - lipgloss.Width(brand) - lipgloss.Width(right) - 3
+	budget := m.width - cellWidth(brand) - cellWidth(right) - 3
 	left := brand + "  " + stDim.Render(truncate(crumb, budget))
-	pad := max(m.width-lipgloss.Width(left)-lipgloss.Width(right), 0)
+	pad := max(m.width-cellWidth(left)-cellWidth(right), 0)
 	return left + strings.Repeat(" ", pad) + right
 }
 
@@ -122,7 +180,7 @@ func (m model) viewSidebar(g geometry) string {
 		}
 		name := truncate(s.Name, g.sbW-2)
 		plain := gutter + name
-		repoW := g.sbW - runewidth.StringWidth(plain) - 2
+		repoW := g.sbW - cellWidth(plain) - 2
 		switch {
 		case i == m.shortcutIdx && active:
 			lines = append(lines, stCursor.Render(padRight(plain, g.sbW)))
@@ -207,56 +265,64 @@ func (m model) viewFooter() string {
 	case stateHelp:
 		return stDim.Render("esc: close help")
 	case stateBrowse:
-		// The footer carries the keys a first-time user needs and no
-		// more: where the cursor moves, what opens it, and how to push,
-		// pull or delete. Filtering and reloading are on the key table
-		// (press ?) rather than here — at 80 columns there is room for
-		// one or the other, and a footer that has silently shed half its
-		// entries teaches nobody which key went missing.
-		//
-		// The bindings are added in the order they are worth keeping, so
-		// a narrow terminal loses the last ones and not the first.
-		all := []key.Binding{
-			k.Up, k.Down, k.Enter,
-			k.Push, k.Pull, k.Delete, k.Edit,
-			k.Filter, k.Refresh, k.Back, k.Help, k.Quit,
-		}
-		if !m.focusPanes {
-			// The sidebar has no row-scoped verbs to offer, so it spends
-			// the room on moving between panes instead.
-			all = []key.Binding{k.Up, k.Down, k.Enter, k.Tab, k.Refresh, k.Help, k.Quit}
-		}
-		return m.clampHelp(m.help.ShortHelpView(m.fitBindings(all)))
+		return m.clampHelp(untruncatingHelp(m.help).ShortHelpView(m.fitBindings(m.footerBindings())))
 	}
-	return m.clampHelp(m.help.ShortHelpView([]key.Binding{k.Quit}))
+	return m.clampHelp(untruncatingHelp(m.help).ShortHelpView([]key.Binding{k.Quit}))
 }
 
-// fitBindings drops bindings from the end until the help line fits, then
-// says so in a trailing marker.
+// footerBindings is the key set the browse footer offers, in the order the
+// entries are worth keeping: a narrow terminal drops from the end, so what
+// survives is what a first-time user needs first.
+//
+// It carries the keys that move the cursor, open a row, and act on the current
+// repository — and nothing else. Filtering and reloading live on the key table
+// behind "?", because at 80 columns there is room for one or the other, and a
+// footer that has silently shed half its entries teaches nobody which key went
+// missing.
+func (m model) footerBindings() []key.Binding {
+	k := m.keys
+	if !m.focusPanes {
+		// The sidebar has no row-scoped verbs to offer, so it spends the room
+		// on moving between panes instead.
+		return []key.Binding{k.Up, k.Down, k.Enter, k.Tab, k.Refresh, k.Help, k.Quit}
+	}
+	return []key.Binding{
+		k.Up, k.Down, k.Enter,
+		k.Push, k.Pull, k.Delete, k.Edit,
+		k.Filter, k.Refresh, k.Back, k.Help, k.Quit,
+	}
+}
+
+// untruncatingHelp returns h with its own truncation switched off, so the
+// footer is fitted here instead of inside bubbles/help. help.Width exists for
+// callers that let help do the fitting; this app measures with cellWidth and
+// must not have a second, locale-driven opinion appended to it.
+func untruncatingHelp(h help.Model) help.Model {
+	h.Width = 0
+	return h
+}
+
+// fitBindings drops bindings from the end until the help line fits. When
+// anything had to go, it appends a marker pointing at the full key table.
 //
 // The marker is English and short on purpose. It is the one part of the
-// footer nobody presses — it points at the full key table behind "?" — so
-// it should cost as little width as possible, and measuring a CJK label to
-// decide whether it fits is a whole class of bug this does not need.
-// fitBindings drops bindings from the end until the help line fits whole,
-// then appends a marker pointing at the full key table.
+// footer nobody presses — it points at the full key table behind "?" — so it
+// should cost as little width as possible.
 //
-// bubbles/help truncates by itself once the line passes help.Width and ends
-// it with an ellipsis, so the only honest test of "does this fit" is whether
-// the rendered help still contains every binding's description. Measuring
-// the returned string instead cannot tell a line that fits from one help
-// has already cut, and the marker would be appended to the tail of a
-// truncated line — visible in the output as a help entry with no key.
-//
-// The marker is English and short on purpose. It is the one part of the
-// footer nobody presses, so it should cost as little width as possible,
-// and measuring a CJK label to decide whether it fits is a class of bug
-// this does not need.
+// A marker is only worth its width when something was actually dropped, so
+// the whole set is tried on its own first. Appending the marker unconditionally
+// meant a window sized to hold every binding still lost one to make room for a
+// pointer to a key table that was already on screen.
 func (m model) fitBindings(bs []key.Binding) []key.Binding {
 	marker := key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "more"))
+	limit := m.helpLimit()
+	wide := untruncatingHelp(m.help)
+	if len(bs) > 0 && cellWidth(wide.ShortHelpView(bs)) <= limit {
+		return bs
+	}
 	for len(bs) > 0 {
 		withMarker := append(append([]key.Binding{}, bs...), marker)
-		if m.helpShowsAll(withMarker) {
+		if cellWidth(wide.ShortHelpView(withMarker)) <= limit {
 			return withMarker
 		}
 		bs = bs[:len(bs)-1]
@@ -264,28 +330,19 @@ func (m model) fitBindings(bs []key.Binding) []key.Binding {
 	return []key.Binding{marker}
 }
 
-// helpShowsAll reports whether help renders every binding's description,
-// which is false exactly when help had to cut the line short.
-func (m model) helpShowsAll(bs []key.Binding) bool {
-	rendered := m.help.ShortHelpView(bs)
-	for _, b := range bs {
-		if d := b.Help().Desc; d != "" && !strings.Contains(rendered, d) {
-			return false
-		}
-	}
-	return true
+// helpLimit is the width the footer line may occupy. It leaves a cell of slack
+// on each side so the frame never butts against the window edge.
+func (m model) helpLimit() int {
+	return max(m.width-2, 10)
 }
 
-// clampHelp keeps the footer inside the window. bubbles/help renders whatever
-// bindings it is given without truncating, so on a narrow terminal the extra
-// row would otherwise be wider than the panes above it and lipgloss would
-// widen the whole screen to match.
+// clampHelp is the last line of defence on the footer width. fitBindings has
+// already chosen a set of bindings that fits, so in a correct frame this is a
+// no-op — it is here so that a future binding with an unusually long
+// description cannot widen the whole screen, which lipgloss would answer by
+// widening every row with it.
 func (m model) clampHelp(s string) string {
-	limit := m.width - 2
-	if limit < 10 {
-		limit = 10
-	}
-	return truncate(s, limit)
+	return truncate(s, m.helpLimit())
 }
 
 func (m model) viewOverlay() string {

@@ -582,7 +582,9 @@ oci-sync tui
 - **详情视图（enter）**：宽表格的兜底手段——在 artifact 上按 enter 弹出居中详情，展示 Full Name、Digest、Version、Size、Encryption、Labels（键排序）。
 - **模态弹窗（居中单框）**：路径输入、密码提示、删除确认（默认 No）、执行结果、`?` 帮助，均以单层圆角框呈现。
 - **三态区分**：产物表为空有三种成因，文案必须分开——未加载仓库（提示选仓库）、仓库为空（提示按 `P` 推送）、被过滤筛空（提示清过滤）。把后两者混为一谈会给出方向相反的下一步。
-- **footer 宽度**：footer 是唯一不受 `truncate` 约束的部分。`bubbles/help` 的 `ShortHelpView` 会自行截断到 `help.Width` 并以省略号收尾——所以判断「放得下吗」只能看**渲染结果里是否还留着每个绑定的描述**，量字符串宽度是量不出 help 有没有已经切过的（切过的行量出来反而更短）。`fitBindings` 从尾部丢绑定直到整行放得下，再补一个指向完整键位表的标记；`clampHelp` 兜住最后 2 列。少了那个标记，footer 会在用户以为「就这些键」时静默少掉一半。
+- **footer 宽度**：footer 是唯一不受 `truncate` 约束的部分，但宽度只在这里判一次。`bubbles/help` 的 `ShortHelpView` 会自行截断到 `help.Width` 并以省略号收尾，而它内部的宽度是 locale 相关的——所以走 `untruncatingHelp`（`Width = 0`）取不截断的渲染，由 `fitBindings` 用 `cellWidth` 从尾部丢绑定，**丢过东西才补 `? more` 指针**（宽度够放下全部键位时指针指向的键位表就在屏幕上，是多余的）。`clampHelp` 只作兜底。少了那个标记，footer 会在用户以为「就这些键」时静默少掉一半。
+
+- **终端宽度必须钉死，不能继承 locale**：东亚歧义宽度字符（`↑` `↓` `•` `→` `…`）在西文终端算 1 列、CJK 终端算 2 列，`lipgloss.Width` 与 `runewidth.DefaultCondition` 都跟着 locale 走。同一句 footer 在 help 里量 90 列、在别处量 100 列，结果是撑破窗口（终端滚动）或被截成 `? …`（键位提示全丢），且两种机器表现不同——本地全绿、用户失败就是这么来的。因此：`cmd/tui.go` 的 `cellCond` 固定按 1 列；`cellWidth` 自剥 ANSI 可直接量已染色字符串；`place`/`joinVertical` 自己实现而非用 `lipgloss.Place`/`JoinVertical`，因为组合器也必须用同一把尺；`help.Width` 对 footer 而言一律置 0。改布局后必须 `RUNEWIDTH_EASTASIAN=0` 与 `=1` 各跑一遍测试。
 
 **响应式下限**：`terminal too small — need at least 48×12`，低于此不渲染花屏。
 
