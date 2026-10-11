@@ -1,10 +1,10 @@
 {pkgs}:
 pkgs.buildGo127Module {
   pname = "oci-sync";
-  version = "0.7.0";
+  version = "0.8.0";
   src = ../.;
 
-  vendorHash = "sha256-RQgKOzx6YGfwJ1ksPrGWnhle+AopJlkc7MjFZY/mk6w=";
+  vendorHash = "sha256-fhsDVYkk4fK8RcElCoYk5aEYVhBK4klVvfuIIKY4pFg=";
 
   nativeBuildInputs = [pkgs.installShellFiles];
   env.CGO_ENABLED = 0;

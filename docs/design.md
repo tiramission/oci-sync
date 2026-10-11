@@ -1,6 +1,6 @@
 # oci-sync 设计文档
 
-> 版本：0.7.0 | 更新时间：2026-10-11
+> 版本：0.8.0 | 更新时间：2026-10-12
 
 ## 1. 项目概述
 
@@ -273,7 +273,7 @@ random salt ─┘                                    key 每次加密都不同�
 | Annotation Key | 值 | 说明 |
 |-----------------|-----|------|
 | `io.oci-sync.encrypted` | `"true"` / `"false"` | 是否加密 |
-| `io.oci-sync.version` | `"0.7.0"` | 工具版本（`internal/version`）|
+| `io.oci-sync.version` | `"0.8.0"` | 工具版本（`internal/version`）|
 | 用户自定义 | 任意字符串 | 通过 `--label key=value` 设置 |
 
 `io.oci-sync.*` 前缀为系统保留命名空间：`label set` / `label unset` 会拒绝此类 key，
