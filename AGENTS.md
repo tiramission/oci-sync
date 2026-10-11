@@ -67,8 +67,45 @@ nix flake update                 # 更新 flake.lock 依赖
 - 加密：`golang.org/x/crypto`（scrypt + AES-256-GCM）
 - 配置：`gopkg.in/yaml.v3`
 - UI：`github.com/pterm/pterm`（表格格式化）
+- 终端 TUI：`github.com/charmbracelet/bubbletea` + `bubbles` + `lipgloss`
+- 桌面 GUI：`github.com/egoist/mygo`（`gui` 子命令，必需）
+- **Go 版本：`go.mod` 要求 1.27.1**（mygo v0.4.2 的硬性要求，不可降低）
 
 禁止添加新依赖，除非有充分理由。
+
+## 🖥 GUI 开发（MyGo）
+
+`oci-sync gui` 用 MyGo 原生 UI（package `ui`），与终端 TUI（bubbletea）并存于同一 binary：
+`mygo.App.Run()` 在 cobra 的 `RunE` 内调用，窗口关闭后命令返回。
+
+MyGo 的 UI 元素在下一次 build pass 即失效，**不可存入 app state**——只存数据、`ui.Handle` 和控件状态。
+副作用必须放在受控的 action 回调里，不能写在渲染代码中（视图一次事件可能重建多次）。
+
+API 以 pinned 源码为准，不要凭记忆：
+
+```bash
+go list -m -f '{{.Dir}}' github.com/egoist/mygo
+```
+
+**几个容易踩的 API 事实**（都已在 `cmd/gui_app.go` 中按真实签名使用）：
+
+| 想知道 | 实际写法 |
+|---|---|
+| 颜色 | 没有 `ui.ColorBorder` 这类常量，取 `c.Theme().Border` / `.TextMuted` / `.Danger` / `.Warning` / `.Selection` |
+| 次要文字 | 没有 `.Muted()`，用 `.TextColor(c.Theme().TextMuted)` |
+| 按钮 | 只有 `Button` / `PrimaryButton` / `ButtonBase`，**没有** `SecondaryButton` / `DangerButton`；危险按钮用 `ButtonBase` 自绘 |
+| 样式开关 | `.Bold()`、`.Password()` 无参数；条件样式要分支整个调用（`Element` 只在创建它的调用里注册进 build pass） |
+| 事件 | `.Clicked()` / `.Changed()` 是**无参的查询**，回调用 `.OnClick(fn)` / `.OnChange(fn)` |
+| 对齐 | 常量是 `ui.Start` / `ui.Center` / `ui.End`，没有 `JustifyEnd` / `AlignTrailing` |
+| 句柄 | `ui.Handle{}` 零值可用，没有 `ui.MakeHandle` |
+| 列表选择态 | `ui.ListState{Selected: *int}`，指针必须活得比窗口久 |
+
+**布局：`Fill()` 会同时吃掉宽和高。** 在 `Column` 里给某个子元素 `Fill()`，它会占满父容器的高度并把自己的内容居中，从而把后续兄弟元素顶出窗口——表现为按钮 `tt.Find()` 得到 `h=0`、点在视口外。toolbar 这类「高度自适应、只占满宽度」的行要用 `FillWidth()`；真正要吃剩余空间的用 `Grow(1)` + `FillHeight()`。
+
+**验证**：`CGO_ENABLED=0 go test ./...`，UI 行为用 `ui.NewTester` 断言。两个约束：
+
+- 一个 `ListState` 只能被一个 `Tester`（=一个窗口）渲染，第二个 Tester 用同一个会 panic。所以「渲染→点击→再断言」必须在**同一个** tester 里做。
+- 布局问题用 `tt.Find(text)` 拿 `Rect` 定位：`h=0` 或 `y` 超出窗口高度就说明元素被挤出视口、点不到。
 
 ## 📚 文档更新
 

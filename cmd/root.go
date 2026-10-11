@@ -63,6 +63,7 @@ func init() {
 	rootCmd.AddCommand(newAliasCmd())
 	rootCmd.AddCommand(newRecentCmd())
 	rootCmd.AddCommand(newTuiCmd())
+	rootCmd.AddCommand(newGuiCmd())
 }
 
 // registerShortcuts attaches one command tree per configured shortcut. It

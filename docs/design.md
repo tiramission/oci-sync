@@ -21,7 +21,7 @@
 │                         CLI 层                            │
 │ cmd/root.go   cmd/push.go   cmd/pull.go   cmd/shortcut.go│
 │ cmd/delete.go cmd/list.go   cmd/label.go  cmd/alias.go   │
-│ cmd/recent.go cmd/tui.go                                 │
+│ cmd/recent.go cmd/tui.go   cmd/gui.go   cmd/gui_app.go   │
 └──────────────┬───────────────┬──────────────┬────────────┘
                │              │
       ┌────────▼───┐    ┌─────▼────────┐
@@ -144,10 +144,13 @@ oci-sync/
 │   ├── tui.go                     # tui 子命令：model 状态机与命令派发
 │   ├── tui_view.go                # tui 渲染：View/overlay/布局计算
 │   ├── tui_keys.go                # tui 按键绑定
+│   ├── gui.go                     # gui 子命令：cobra 定义与窗口创建
+│   ├── gui_app.go                 # gui 应用：状态、后台任务、视图函数
 │   ├── utils.go                   # 共用工具（formatBytes / label 解析 / 活动记录）
 │   ├── utils_test.go              # label 校验与解析单元测试
 │   ├── shortcut_test.go           # shortcut 引用构造单元测试
-│   └── tui_test.go                # tui 状态机与渲染单元测试
+│   ├── tui_test.go                # tui 状态机与渲染单元测试
+│   └── gui_test.go                # gui 状态逻辑与 headless 渲染测试
 └── internal/
     ├── config/
     │   ├── config.go              # 配置文件支持
@@ -322,8 +325,9 @@ Windows 默认不设置 `HOME`，缺少回退会让上述目录退化为相对�
 | `golang.org/x/crypto` | v0.49.0 | scrypt KDF |
 | `gopkg.in/yaml.v3` | v3.0.1 | 配置文件解析 |
 | `github.com/stretchr/testify` | v1.11.1 | 测试断言 |
+| `github.com/egoist/mygo` | v0.4.2 | 桌面 GUI 框架（纯 Go，无 cgo）|
 
-Go 工具链：`go 1.25.8`。
+Go 工具链：`go 1.27.1`（mygo v0.4.2 的硬性要求，不可降低）。
 
 ---
 
@@ -557,6 +561,43 @@ oci-sync tui
 - `/`：按 tag 过滤（smart-case：小写不区分大小写，含大写则区分）
 - `Esc`：加载/拉取/删除进行中取消操作，否则关闭弹窗或退回 Shortcuts 栏
 - `?`：打开/关闭帮助；`q` / `Ctrl+C`：退出
+
+### gui
+
+启动原生桌面窗口（MyGo），提供与 TUI 等价的浏览 / 拉取 / 删除能力。
+
+```bash
+# 启动桌面 GUI
+oci-sync gui
+```
+
+**实现方式**：`mygo.App.Run()` 在 cobra 的 `RunE` 内调用——它虽阻塞，但 `App.Quit()` /
+`App.Exit(code)` 可从外部结束，因此与 CLI 共处一个 binary 而无需拆分。窗口关闭后命令返回，
+退出码即 `gui` 的退出码。
+
+**界面分区**：
+- **Toolbar（顶部）**：应用名、tag 过滤输入框、加载指示、`Refresh` 按钮。
+- **Shortcuts（左侧边栏）**：配置的 shortcuts，选中行以主题 `Selection` 色高亮。
+- **Artifacts（右侧主栏）**：当前 shortcut 的 tag 表格（`TAG`、`SIZE`、`ENC`、`VERSION`），
+  带失败原因、空态说明与加载态文案。
+- **操作区（表格下方）**：`Pull…` / `Delete…`，未选中行时替换为提示文案。
+- **模态弹窗**：拉取（目标目录 + 浏览按钮 + 密码）、删除确认、失败信息。拉取进行中显示
+  阶段文案与下载进度条。
+
+**状态与生命周期约束**（MyGo 特有，写错会静默出错）：
+
+| 约束 | 原因 |
+|---|---|
+| app state 只存数据、`ui.ListState`、`ui.Handle` | UI 元素在下一次 build pass 即失效，存下来就是陈旧指针 |
+| 远端调用一律 `go` + `win.Update(fn)` | `Update` 把结果送回主线程；goroutine 直接改状态会与渲染竞争 |
+| `ui.Modal` 的 `open` 必须是 app 字段 | 传局部变量则每帧都是新的 `false`，弹窗永不出现 |
+| 用 `jobSeq` 作废过期结果 | 用户切换 shortcut 后，先发的请求返回时不得覆盖新选择 |
+| 副作用只在 `Clicked()` 等动作回调里触发 | 渲染代码一次事件可能被执行多次 |
+| toolbar 用 `FillWidth()` 而非 `Fill()` | `Fill()` 会占满父容器高度并居中内容，把下方兄弟元素顶出窗口 |
+
+**验证**：`cmd/gui_test.go` 用 `ui.NewTester` 做 headless 断言，覆盖过滤、选中、空态/错误态、
+弹窗开关、进度文案与多帧稳定性。约束：一个 `ListState` 只能被一个 Tester 渲染，第二个 Tester
+复用它会 panic，因此「渲染→点击→再断言」必须在同一个 tester 内完成。
 
 ---
 
