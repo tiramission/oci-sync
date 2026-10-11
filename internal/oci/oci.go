@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +45,10 @@ type ociManifest struct {
 	Annotations map[string]string    `json:"annotations,omitempty"`
 }
 
+// Push uploads data as the artifact's single layer.
+//
+// It buffers the whole payload in memory. PushFile is the streaming
+// counterpart and should be preferred for anything large.
 func Push(ctx context.Context, data []byte, ref string, encrypted bool, labels map[string]string) error {
 	repo, err := newRepository(ctx, ref)
 	if err != nil {
@@ -56,6 +61,60 @@ func Push(ctx context.Context, data []byte, ref string, encrypted bool, labels m
 		Size:      int64(len(data)),
 	}
 
+	if err := repo.Push(ctx, layerDesc, bytes.NewReader(data)); err != nil {
+		return fmt.Errorf("push layer: %w", err)
+	}
+
+	return pushManifest(ctx, repo, layerDesc, encrypted, labels)
+}
+
+// PushFile uploads the contents of path as the artifact's single layer,
+// reading it in bounded chunks instead of holding it in memory.
+//
+// The registry needs a blob's digest in the descriptor before it will
+// accept the upload, so a stream whose digest is not yet known has to be
+// staged somewhere first. A file on disk is that staging: the memory cost
+// stays one buffer regardless of how large the artifact is, which is what
+// makes pushing a multi-gigabyte backup possible.
+func PushFile(ctx context.Context, path, ref string, encrypted bool, labels map[string]string) error {
+	repo, err := newRepository(ctx, ref)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open staged blob %s: %w", path, err)
+	}
+	defer f.Close()
+
+	// Hash first, then rewind: the descriptor has to carry the digest
+	// before the upload starts.
+	digester := digest.SHA256.Digester()
+	size, err := io.Copy(digester.Hash(), f)
+	if err != nil {
+		return fmt.Errorf("hash staged blob: %w", err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind staged blob: %w", err)
+	}
+
+	layerDesc := ocispec.Descriptor{
+		MediaType: mediaTypeLayer,
+		Digest:    digester.Digest(),
+		Size:      size,
+	}
+
+	if err := repo.Push(ctx, layerDesc, f); err != nil {
+		return fmt.Errorf("push layer: %w", err)
+	}
+
+	return pushManifest(ctx, repo, layerDesc, encrypted, labels)
+}
+
+// pushManifest writes the manifest describing layerDesc and points ref at
+// it. The layer must already be in the repository.
+func pushManifest(ctx context.Context, repo *remote.Repository, layerDesc ocispec.Descriptor, encrypted bool, labels map[string]string) error {
 	annotations := map[string]string{
 		AnnotationVersion: version.Version,
 	}
@@ -87,10 +146,6 @@ func Push(ctx context.Context, data []byte, ref string, encrypted bool, labels m
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
-	}
-
-	if err := repo.Push(ctx, layerDesc, bytes.NewReader(data)); err != nil {
-		return fmt.Errorf("push layer: %w", err)
 	}
 
 	if err := repo.Push(ctx, configDesc, bytes.NewReader(configBytes)); err != nil {
@@ -133,30 +188,42 @@ func IsEncrypted(ctx context.Context, ref string) (bool, error) {
 	return manifest.Annotations[AnnotationEncrypted] == "true", nil
 }
 
+// layerOf resolves ref's manifest and returns its single layer descriptor
+// and whether the artifact is encrypted.
+func layerOf(ctx context.Context, repo *remote.Repository) (ocispec.Descriptor, bool, error) {
+	_, manifestBytes, err := oras.FetchBytes(ctx, repo, repo.Reference.Reference, oras.DefaultFetchBytesOptions)
+	if err != nil {
+		return ocispec.Descriptor{}, false, fmt.Errorf("fetch manifest: %w", err)
+	}
+
+	var manifest ociManifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		return ocispec.Descriptor{}, false, fmt.Errorf("unmarshal manifest: %w", err)
+	}
+	if len(manifest.Layers) == 0 {
+		return ocispec.Descriptor{}, false, fmt.Errorf("manifest has no layers")
+	}
+
+	return manifest.Layers[0], manifest.Annotations[AnnotationEncrypted] == "true", nil
+}
+
 // Pull fetches the artifact layer for ref. When onRead is non-nil it is
 // called after every read chunk with the cumulative downloaded bytes and the
 // total layer size, enabling progress reporting.
+//
+// It buffers the whole layer in memory. PullToFile is the streaming
+// counterpart and should be preferred for anything large.
 func Pull(ctx context.Context, ref string, onRead func(done, total int64)) (*PullResult, error) {
 	repo, err := newRepository(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
 
-	_, manifestBytes, err := oras.FetchBytes(ctx, repo, repo.Reference.Reference, oras.DefaultFetchBytesOptions)
+	layerDesc, encrypted, err := layerOf(ctx, repo)
 	if err != nil {
-		return nil, fmt.Errorf("fetch manifest: %w", err)
+		return nil, err
 	}
 
-	var manifest ociManifest
-	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		return nil, fmt.Errorf("unmarshal manifest: %w", err)
-	}
-
-	if len(manifest.Layers) == 0 {
-		return nil, fmt.Errorf("manifest has no layers")
-	}
-
-	layerDesc := manifest.Layers[0]
 	rc, err := repo.Blobs().Fetch(ctx, layerDesc)
 	if err != nil {
 		return nil, fmt.Errorf("fetch layer blob: %w", err)
@@ -169,11 +236,53 @@ func Pull(ctx context.Context, ref string, onRead func(done, total int64)) (*Pul
 		return nil, fmt.Errorf("read layer: %w", err)
 	}
 
-	encrypted := manifest.Annotations[AnnotationEncrypted] == "true"
 	return &PullResult{
 		Data:      buf.Bytes(),
 		Encrypted: encrypted,
 	}, nil
+}
+
+// PullToFile streams the artifact layer for ref into path. When onRead is
+// non-nil it is called with the cumulative downloaded bytes and the total
+// layer size.
+//
+// It reports whether the artifact is encrypted, which the caller needs
+// before deciding how to interpret the file: the bytes on disk are the
+// layer as stored, so an encrypted artifact lands there still encrypted.
+func PullToFile(ctx context.Context, path, ref string, onRead func(done, total int64)) (bool, error) {
+	repo, err := newRepository(ctx, ref)
+	if err != nil {
+		return false, err
+	}
+
+	layerDesc, encrypted, err := layerOf(ctx, repo)
+	if err != nil {
+		return false, err
+	}
+
+	rc, err := repo.Blobs().Fetch(ctx, layerDesc)
+	if err != nil {
+		return false, fmt.Errorf("fetch layer blob: %w", err)
+	}
+	defer rc.Close()
+
+	f, err := os.Create(path)
+	if err != nil {
+		return false, fmt.Errorf("create staging file %s: %w", path, err)
+	}
+	defer f.Close()
+
+	pw := &progressWriter{w: f, total: layerDesc.Size, on: onRead}
+	if _, err := io.Copy(pw, rc); err != nil {
+		return false, fmt.Errorf("write layer to %s: %w", path, err)
+	}
+	// A pull that fails here has written a truncated file; leaving it would
+	// let a later step read it as if it were complete.
+	if err := f.Close(); err != nil {
+		return false, fmt.Errorf("close staging file %s: %w", path, err)
+	}
+
+	return encrypted, nil
 }
 
 type progressWriter struct {

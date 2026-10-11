@@ -45,19 +45,22 @@
 
 **数据流（push）**
 ```
-本地路径 → [archive.Pack] → tar.gz bytes
-         → [crypto.Encrypt]（可选）→ 加密 bytes
-         → [oci.Push] → OCI manifest + layer → Registry
+本地路径 → [archive.Pack] → tar.gz 流
+         → [crypto.EncryptWriter]（可选）→ 分块密文流
+         → 落地为 staging 文件（算 digest）
+         → [oci.PushFile] → OCI manifest + layer → Registry
 ```
 
 **数据流（pull）**
 ```
 Registry → [oci.IsEncrypted] → 检查加密状态（manifest 只读）
          → 校验 --passphrase 参数（若缺失则快速失败，无需下载）
-         → [oci.Pull] → layer bytes + annotations
-         → [crypto.Decrypt]（若加密）→ tar.gz bytes
+         → [oci.PullToFile] → layer 流入 staging 文件
+         → [crypto.DecryptReader]（若加密）→ tar.gz 流
          → [archive.Unpack] → 本地路径
 ```
+
+push 与 pull 全程流式：内存峰值是一个 1 MiB 分块，与 artifact 大小无关。
 
 **数据流（shortcut commands）**
 ```
@@ -135,6 +138,7 @@ oci-sync/
 │   ├── root.go                    # 根命令 & 全局配置（--quiet / -q）
 │   ├── push.go                    # push 子命令
 │   ├── pull.go                    # pull 子命令
+│   ├── stage.go                   # push/pull 共用的流式 staging 链
 │   ├── shortcut.go                # 动态 shortcut 子命令组
 │   ├── delete.go                  # delete 子命令
 │   ├── list.go                    # list 子命令
@@ -159,7 +163,7 @@ oci-sync/
     │   ├── archive.go             # tar.gz 打包/解包
     │   └── archive_test.go        # 单元测试
     ├── crypto/
-    │   ├── crypto.go              # AES-256-GCM 加密/解密
+    │   ├── crypto.go              # AES-256-GCM 分块流式加密/解密
     │   └── crypto_test.go         # 单元测试
     ├── oci/
     │   ├── oci.go                 # OCI push/pull/list（oras-go v2）
@@ -181,8 +185,10 @@ oci-sync/
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
-| `Pack` | `(srcPath string) ([]byte, error)` | 将文件或目录打包为 tar.gz，返回字节 |
-| `Unpack` | `(data []byte, destPath string) error` | 将 tar.gz 字节解包到指定目录 |
+| `Pack` | `(w io.Writer, srcPath string) error` | 将文件或目录打包为 tar.gz 写入 w |
+| `PackBytes` | `(srcPath string) ([]byte, error)` | `Pack` 的内存包装 |
+| `Unpack` | `(r io.Reader, destPath string) error` | 从 r 读取 tar.gz 并解包到指定目录 |
+| `UnpackBytes` | `(data []byte, destPath string) error` | `Unpack` 的内存包装 |
 
 **实现细节**
 - 使用标准库 `archive/tar` + `compress/gzip`，无额外依赖
@@ -190,36 +196,53 @@ oci-sync/
 - tar 成员名统一用 `/` 分隔（`filepath.ToSlash`）：`filepath.Join` 在 Windows 上产生 `\`，会导致跨平台 push → pull 时目录结构塌陷为扁平文件名
 - 符号链接按目标内容打包为普通文件（Unpack 只落地普通文件与目录，若存链接目标则 round-trip 后全变空文件）；指向目录的链接跳过，避免子树重复
 - 解包时进行路径穿越检查（Path Traversal Security）；以 `/` 开头的成员名会被 `filepath.Join` 折入目标目录内部，属于安全收敛而非拒绝
+- 打包与解包都是流式的；`*Bytes` 变体只保留给测试和不需要流式的调用方
 
-### 4.2 `internal/crypto` — 加密/解密
+### 4.2 `internal/crypto` — 分块流式加密/解密
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
-| `Encrypt` | `(data []byte, passphrase string) ([]byte, error)` | 加密数据 |
-| `Decrypt` | `(data []byte, passphrase string) ([]byte, error)` | 解密数据 |
+| `NewEncryptPassphrase` | `(w io.Writer, passphrase string) (*EncryptWriter, error)` | 生成随机 salt、派生密钥，返回写入 w 的加密 writer |
+| `NewEncryptWriter` | `(w io.Writer, key, salt []byte) (*EncryptWriter, error)` | 由已派生的密钥与 salt 构造 |
+| `NewDecryptPassphrase` | `(r io.Reader, passphrase string) (*DecryptReader, error)` | 读取流头中的 salt，派生密钥并校验 magic |
+| `ErrNotChunked` | — | 流缺少 `"OCS1"` magic，用于区分「不是我们的格式」与「我们的格式损坏了」 |
+
+`EncryptWriter` 必须 `Close`：它负责写出流头、封存最后一个分块、追加终止符。`Close` 不是幂等的，二次调用报错而不是写出第二个终止符——那样的流读不回来。
+
+**流格式**
+```
+"OCS1" | salt(32B) | ( u32be ciphertextLen | ciphertext+tag )*
+```
+长度为 0 的分块即终止符，读端因此不必猜测最后一个分块在哪里。
 
 **加密算法**
 - **KDF**：scrypt（N=32768, r=8, p=1）→ 32 字节密钥
 - **加密**：AES-256-GCM（认证加密，同时提供保密性和完整性）
-- **存储格式**：`[salt(32B) | nonce(12B) | ciphertext+GCM-tag]`
-- 每次加密生成新的随机 salt 和 nonce，保证相同明文加密结果不同
+- **分块大小**：`ChunkSize = 1 MiB`（`crypto.ChunkSize`）。这是内存上界：加解密两侧任何时刻各只持有一个分块。1 MiB 下每块 20 字节开销（4 字节长度 + 16 字节 tag）远低于 0.01%
+- **nonce**：每个分块的 nonce 仅由块索引派生。同一密钥下重用 nonce 会破坏 GCM，但密钥本身来自随机 32 字节 salt，因此跨流永不复用；流内索引唯一，这正是 GCM 实际要求的条件
+- **AAD**：`"OCS1" | u32be(index)`，把分块位置绑定到明文上。分块被移到另一个位置或另一条流都会认证失败
+- 每次加密生成新的随机 salt，相同明文两次加密结果不同
+
+**格式不兼容**：旧的一次性 `Encrypt([]byte)` / `Decrypt([]byte)` 已删除，旧版本写出的密文无法用当前代码读回。这是有意的取舍——保留旧格式意味着在一个已经分块化的包里再养一条一次性路径及其一整套测试。
+
+**staging 文件**：`cmd/stage.go` 把 pack →（加密）→ 落盘串成一条链。中间落地不是优化，而是硬性要求：Registry 按内容 digest 寻址 blob，digest 必须在上传开始前已知，而刚打好的 tar.gz、刚加密完的流都还不知道自己的 digest。文件就是那个「某处」，它花的是磁盘而不是内存。
 
 ```
 passphrase ──┐
-             ├─► scrypt(N=32768) ──► 32B key ──► AES-256-GCM ──► ciphertext
-random salt ─┘                                        │
-random nonce ────────────────────────────────────────►│
-                                                      ▼
-                              [salt(32B)][nonce(12B)][ciphertext+tag]
+             ├─► scrypt(N=32768, salt) ──► 32B key ──► AES-256-GCM ──► 分块密文流
+random salt ─┘                                    key 每次加密都不同，
+                                                  因此 nonce(index) 无需跨流唯一
 ```
 
 ### 4.3 `internal/oci` — OCI 操作
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
-| `Push` | `(ctx, data []byte, ref string, encrypted bool, labels map[string]string) error` | 推送 artifact（支持 labels） |
+| `Push` | `(ctx, data []byte, ref string, encrypted bool, labels map[string]string) error` | 推送 artifact（内存版，支持 labels） |
+| `PushFile` | `(ctx, path, ref string, encrypted bool, labels map[string]string) error` | 从文件推送：先算 digest 与大小，再流式上传 |
 | `IsEncrypted` | `(ctx, ref string) (bool, error)` | 检查加密状态（仅拉取 manifest） |
-| `Pull` | `(ctx, ref string, onRead func(done, total int64)) (*PullResult, error)` | 拉取 artifact；`onRead` 按下载块回报字节进度（可为 nil） |
+| `Pull` | `(ctx, ref string, onRead func(done, total int64)) (*PullResult, error)` | 拉取 artifact 到内存；`onRead` 按下载块回报字节进度（可为 nil） |
+| `PullToFile` | `(ctx, path, ref string, onRead func(done, total int64)) (bool, error)` | 流式下载 layer 到文件，返回是否加密 |
 | `Delete` | `(ctx, ref string) error` | 删除远程 artifact |
 | `List` | `(ctx, ref string) ([]ArtifactInfo, error)` | 列出远程仓库镜像记录（支持 Registry/Repo）|
 | `UpdateAnnotations` | `(ctx, ref string, updates map[string]string, removeKeys []string) error` | 更新 manifest annotations（set/unset labels）|

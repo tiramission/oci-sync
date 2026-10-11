@@ -3,13 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"charm.land/log/v2"
 	"github.com/spf13/cobra"
-	"github.com/tiramission/oci-sync/internal/archive"
 	"github.com/tiramission/oci-sync/internal/cache"
-	"github.com/tiramission/oci-sync/internal/crypto"
 	"github.com/tiramission/oci-sync/internal/oci"
 )
 
@@ -46,24 +45,20 @@ func runPush(ctx context.Context, localPath, remotePath, passphrase string, labe
 	}
 
 	log.Info("Packing files...", "path", localPath)
-	data, err := archive.Pack(localPath)
+	staged, encrypted, err := stageWriter(localPath, passphrase)
 	if err != nil {
 		return fmt.Errorf("pack failed: %w", err)
 	}
-	log.Info("Pack complete", "size", formatBytes(len(data)))
+	defer os.Remove(staged)
 
-	encrypted := passphrase != ""
-	if encrypted {
-		log.Info("Encrypting...")
-		data, err = crypto.Encrypt(data, passphrase)
-		if err != nil {
-			return fmt.Errorf("encryption failed: %w", err)
-		}
-		log.Info("Encryption complete", "size", formatBytes(len(data)))
+	size, err := fileSize(staged)
+	if err != nil {
+		return err
 	}
+	log.Info("Pack complete", "size", formatBytes(size), "encrypted", encrypted)
 
 	log.Info("Pushing to registry...", "ref", remotePath)
-	if err := oci.Push(ctx, data, remotePath, encrypted, labelMap); err != nil {
+	if err := oci.PushFile(ctx, staged, remotePath, encrypted, labelMap); err != nil {
 		return fmt.Errorf("push failed: %w", err)
 	}
 

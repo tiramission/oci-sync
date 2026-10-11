@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tiramission/oci-sync/internal/archive"
 	"github.com/tiramission/oci-sync/internal/cache"
-	"github.com/tiramission/oci-sync/internal/crypto"
 	"github.com/tiramission/oci-sync/internal/oci"
 )
 
@@ -70,26 +69,33 @@ func runPull(ctx context.Context, remotePath, localPath, passphrase string, onPr
 		log.Warn("content is not encrypted, ignoring --passphrase flag")
 	}
 
-	report(PullStage{Phase: "download"})
-	result, err := oci.Pull(ctx, remotePath, func(done, total int64) {
-		report(PullStage{Phase: "download", Done: done, Total: total})
-	})
+	// The layer is staged on disk rather than held in memory: an artifact
+	// can be far larger than RAM, and the next stages (decrypt, gunzip,
+	// untar) all read it as a stream anyway.
+	staged, err := stageTempFile("oci-sync-pull")
 	if err != nil {
+		return err
+	}
+	defer os.Remove(staged)
+
+	report(PullStage{Phase: "download"})
+	if err := pullToStaged(ctx, staged, remotePath, report); err != nil {
 		return fmt.Errorf("pull failed: %w", err)
 	}
-	log.Info("Pull complete", "size", formatBytes(len(result.Data)), "encrypted", result.Encrypted)
-
-	data := result.Data
-
-	if result.Encrypted {
-		log.Info("Decrypting...")
-		report(PullStage{Phase: "decrypt", Total: int64(len(data))})
-		data, err = crypto.Decrypt(data, passphrase)
-		if err != nil {
-			return fmt.Errorf("decryption failed: %w", err)
-		}
-		log.Info("Decryption complete")
+	size, err := fileSize(staged)
+	if err != nil {
+		return err
 	}
+	log.Info("Pull complete", "size", formatBytes(size), "encrypted", encrypted)
+
+	// Unpack reads the staged file as a stream, decrypting on the way
+	// through, so the plaintext archive never exists in memory either.
+	report(PullStage{Phase: "decrypt", Total: size})
+	reader, err := openDecrypted(staged, passphrase, encrypted)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
 
 	// Ensure destination directory exists
 	if err := os.MkdirAll(localPath, 0o755); err != nil {
@@ -98,7 +104,7 @@ func runPull(ctx context.Context, remotePath, localPath, passphrase string, onPr
 
 	log.Info("Unpacking files...", "dest", localPath)
 	report(PullStage{Phase: "unpack"})
-	if err := archive.Unpack(data, localPath); err != nil {
+	if err := archive.Unpack(reader, localPath); err != nil {
 		return fmt.Errorf("unpack failed: %w", err)
 	}
 

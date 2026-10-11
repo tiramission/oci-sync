@@ -60,11 +60,13 @@ nix flake update                 # 更新 flake.lock 依赖
 
 **安全：** 所有文件解包都使用 `filepath.Abs()` 防止路径穿越攻击（见 `internal/archive/archive.go`）。
 
+**大文件一律流式：** push/pull 不得把 artifact 整体读进内存。链路是 pack →（加密）→ staging 文件 → 上传，pull 反向，峰值内存是一个 1 MiB 分块（`crypto.ChunkSize`）。中间落地到文件不是偷懒：Registry 按内容 digest 寻址 blob，digest 必须先知道，而刚打好的 tar.gz 还不知道自己的 digest。改动这条链路时，内存版的 `archive.PackBytes`、`oci.Push`、`oci.Pull` 只能留给测试和非流式调用方。
+
 **依赖（已锁定）：**
 - CLI 框架：`github.com/spf13/cobra`（必需）
 - OCI 交互：`oras.land/oras-go/v2`（必需且唯一）
 - 日志：`charm.land/log/v2`
-- 加密：`golang.org/x/crypto`（scrypt + AES-256-GCM）
+- 加密：`golang.org/x/crypto`（scrypt + AES-256-GCM，分块流式）
 - 配置：`gopkg.in/yaml.v3`
 - UI：`github.com/pterm/pterm`（表格格式化）
 - 终端 TUI：`github.com/charmbracelet/bubbletea` + `bubbles` + `lipgloss`
@@ -122,8 +124,8 @@ go list -m -f '{{.Dir}}' github.com/egoist/mygo
 ```
 cmd/              # CLI 命令（基于 cobra）
 internal/
-  archive/        # tar.gz 打包/解包
-  crypto/         # AES-256-GCM 加密
+  archive/        # tar.gz 流式打包/解包
+  crypto/         # AES-256-GCM 分块流式加密
   oci/            # oras-go v2 push/pull/list/delete
   config/         # YAML 配置解析（gopkg.in/yaml.v3）
 nix/              # Nix flake 包和开发 shell

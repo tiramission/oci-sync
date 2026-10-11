@@ -119,7 +119,7 @@ func runList(ctx context.Context, repoPath string, format string, filterLabels [
 				}
 				labelStr = strings.Join(pairs, ",")
 			}
-			data = append(data, []string{a.Repo, a.Tag, encStr, a.Version, formatBytes(int(a.Size)), digestShort, labelStr})
+			data = append(data, []string{a.Repo, a.Tag, encStr, a.Version, formatBytes(a.Size), digestShort, labelStr})
 		}
 
 		output, _ := pterm.DefaultTable.

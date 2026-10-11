@@ -341,9 +341,9 @@ func (m model) pullProgressBody(barW int) string {
 		if s.Total > 0 {
 			pct := min(s.Done*100/max(s.Total, 1), 100)
 			return renderBar(s.Done, s.Total, barW) + "  " +
-				fmt.Sprintf("%3d%%  %s / %s", pct, formatBytes(int(s.Done)), formatBytes(int(s.Total)))
+				fmt.Sprintf("%3d%%  %s / %s", pct, formatBytes(s.Done), formatBytes(s.Total))
 		}
-		return fmt.Sprintf("Downloading %s…", formatBytes(int(s.Done)))
+		return fmt.Sprintf("Downloading %s…", formatBytes(s.Done))
 	case "decrypt":
 		return renderBar(0, 1, barW) + "  Decrypting…"
 	case "unpack":

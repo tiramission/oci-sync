@@ -1,4 +1,9 @@
 // Package archive provides tar.gz packing and unpacking functionality.
+//
+// Both directions stream: Pack writes into an io.Writer and Unpack reads
+// from an io.Reader, so neither holds a whole archive in memory. A caller
+// that wants the bytes still has PackBytes/UnpackBytes, which simply wrap
+// a buffer.
 package archive
 
 import (
@@ -12,17 +17,16 @@ import (
 	"strings"
 )
 
-// Pack packs the given path (file or directory) into a tar.gz archive
-// and returns the compressed bytes.
-func Pack(srcPath string) ([]byte, error) {
+// Pack packs the given path (file or directory) as a tar.gz archive written
+// to w. Nothing is buffered whole: each file is copied straight through.
+func Pack(w io.Writer, srcPath string) error {
 	srcPath = filepath.Clean(srcPath)
 	info, err := os.Stat(srcPath)
 	if err != nil {
-		return nil, fmt.Errorf("stat %s: %w", srcPath, err)
+		return fmt.Errorf("stat %s: %w", srcPath, err)
 	}
 
-	var buf bytes.Buffer
-	gw := gzip.NewWriter(&buf)
+	gw := gzip.NewWriter(w)
 	tw := tar.NewWriter(gw)
 
 	if info.IsDir() {
@@ -31,14 +35,24 @@ func Pack(srcPath string) ([]byte, error) {
 		err = packFile(tw, srcPath, filepath.Base(srcPath))
 	}
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := tw.Close(); err != nil {
-		return nil, fmt.Errorf("close tar writer: %w", err)
+		return fmt.Errorf("close tar writer: %w", err)
 	}
 	if err := gw.Close(); err != nil {
-		return nil, fmt.Errorf("close gzip writer: %w", err)
+		return fmt.Errorf("close gzip writer: %w", err)
+	}
+	return nil
+}
+
+// PackBytes packs srcPath and returns the compressed bytes. It buffers the
+// whole archive, so prefer Pack for anything large.
+func PackBytes(srcPath string) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := Pack(&buf, srcPath); err != nil {
+		return nil, err
 	}
 	return buf.Bytes(), nil
 }
@@ -133,9 +147,14 @@ func packFile(tw *tar.Writer, srcFile, name string) error {
 	return writeFileTo(tw, srcFile)
 }
 
-// Unpack extracts the tar.gz archive bytes into destPath.
+// Unpack extracts a tar.gz archive read from r into destPath.
 // If destPath does not exist, it will be created.
-func Unpack(data []byte, destPath string) error {
+//
+// Entries are written as they arrive, so the archive is never held in
+// memory. A partially written destination is left behind on error: an
+// interrupted pull should not look like a successful one, and removing
+// files the user may have had before would be worse.
+func Unpack(r io.Reader, destPath string) error {
 	absDestPath, err := filepath.Abs(destPath)
 	if err != nil {
 		return fmt.Errorf("get absolute dest path: %w", err)
@@ -145,7 +164,7 @@ func Unpack(data []byte, destPath string) error {
 		return fmt.Errorf("create dest dir %s: %w", absDestPath, err)
 	}
 
-	gr, err := gzip.NewReader(bytes.NewReader(data))
+	gr, err := gzip.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("create gzip reader: %w", err)
 	}
@@ -193,4 +212,10 @@ func Unpack(data []byte, destPath string) error {
 		}
 	}
 	return nil
+}
+
+// UnpackBytes extracts a tar.gz archive held in data. It is the in-memory
+// counterpart of Unpack; prefer Unpack for anything large.
+func UnpackBytes(data []byte, destPath string) error {
+	return Unpack(bytes.NewReader(data), destPath)
 }

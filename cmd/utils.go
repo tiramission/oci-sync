@@ -52,13 +52,17 @@ func recordActivity(a cache.Activity) {
 	}
 }
 
-// formatBytes formats a byte count as a human-readable string.
-func formatBytes(n int) string {
+// formatBytes formats a byte count as a human-readable string. It takes
+// int64 because every size in this program comes off the wire or off the
+// filesystem as an int64; an int parameter would truncate a multi-
+// gigabyte artifact on a 32-bit build and invite the same truncation at
+// every call site that tried to pre-empt it.
+func formatBytes(n int64) string {
 	const unit = 1024
 	if n < unit {
 		return fmt.Sprintf("%d B", n)
 	}
-	div, exp := unit, 0
+	div, exp := int64(unit), 0
 	for v := n / unit; v >= unit; v /= unit {
 		div *= unit
 		exp++

@@ -22,7 +22,7 @@ func TestPackUnpackFile(t *testing.T) {
 	}
 
 	// Pack
-	data, err := archive.Pack(srcFile)
+	data, err := archive.PackBytes(srcFile)
 	if err != nil {
 		t.Fatalf("Pack error: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestPackUnpackFile(t *testing.T) {
 
 	// Unpack
 	destDir := filepath.Join(tmpDir, "out")
-	if err := archive.Unpack(data, destDir); err != nil {
+	if err := archive.UnpackBytes(data, destDir); err != nil {
 		t.Fatalf("Unpack error: %v", err)
 	}
 
@@ -67,14 +67,14 @@ func TestPackUnpackDirectory(t *testing.T) {
 	}
 
 	// Pack
-	data, err := archive.Pack(srcDir)
+	data, err := archive.PackBytes(srcDir)
 	if err != nil {
 		t.Fatalf("Pack error: %v", err)
 	}
 
 	// Unpack
 	destDir := filepath.Join(tmpDir, "out")
-	if err := archive.Unpack(data, destDir); err != nil {
+	if err := archive.UnpackBytes(data, destDir); err != nil {
 		t.Fatalf("Unpack error: %v", err)
 	}
 
@@ -108,13 +108,13 @@ func TestPackFollowsSymlinks(t *testing.T) {
 		t.Skipf("symlinks unsupported on this host: %v", err)
 	}
 
-	data, err := archive.Pack(srcDir)
+	data, err := archive.PackBytes(srcDir)
 	if err != nil {
 		t.Fatalf("Pack error: %v", err)
 	}
 
 	destDir := filepath.Join(tmpDir, "out")
-	if err := archive.Unpack(data, destDir); err != nil {
+	if err := archive.UnpackBytes(data, destDir); err != nil {
 		t.Fatalf("Unpack error: %v", err)
 	}
 
@@ -142,13 +142,13 @@ func TestPackSkipsSymlinkedDirectories(t *testing.T) {
 		t.Skipf("symlinks unsupported on this host: %v", err)
 	}
 
-	data, err := archive.Pack(srcDir)
+	data, err := archive.PackBytes(srcDir)
 	if err != nil {
 		t.Fatalf("Pack error: %v", err)
 	}
 
 	destDir := filepath.Join(tmpDir, "out")
-	if err := archive.Unpack(data, destDir); err != nil {
+	if err := archive.UnpackBytes(data, destDir); err != nil {
 		t.Fatalf("Unpack error: %v", err)
 	}
 
@@ -199,7 +199,7 @@ func TestUnpackRejectsPathTraversal(t *testing.T) {
 			}
 
 			destDir := t.TempDir()
-			if err := archive.Unpack(buf.Bytes(), destDir); err == nil {
+			if err := archive.UnpackBytes(buf.Bytes(), destDir); err == nil {
 				t.Errorf("Unpack(%q) = nil, want a path traversal error", name)
 			}
 		})
@@ -229,7 +229,7 @@ func TestUnpackKeepsLeadingSlashInsideDest(t *testing.T) {
 	}
 
 	destDir := t.TempDir()
-	if err := archive.Unpack(buf.Bytes(), destDir); err != nil {
+	if err := archive.UnpackBytes(buf.Bytes(), destDir); err != nil {
 		t.Fatalf("Unpack error: %v", err)
 	}
 
@@ -259,7 +259,7 @@ func TestPackUsesSlashSeparatedMemberNames(t *testing.T) {
 		}
 	}
 
-	data, err := archive.Pack(srcDir)
+	data, err := archive.PackBytes(srcDir)
 	if err != nil {
 		t.Fatalf("Pack error: %v", err)
 	}
@@ -295,5 +295,52 @@ func TestPackUsesSlashSeparatedMemberNames(t *testing.T) {
 	}
 	for n := range want {
 		t.Errorf("missing member name %q", n)
+	}
+}
+
+// TestPackUnpackStreamsThroughWriters covers the path the CLI actually
+// takes: pack straight into a file, then unpack straight from one,
+// without the whole archive ever existing as one []byte.
+func TestPackUnpackStreamsThroughWriters(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcDir := filepath.Join(tmpDir, "big")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Larger than a single copy buffer, so Pack has to flush repeatedly.
+	body := bytes.Repeat([]byte("oci-sync streaming payload\n"), 40_000)
+	if err := os.WriteFile(filepath.Join(srcDir, "big.txt"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	archivePath := filepath.Join(tmpDir, "archive.tar.gz")
+	f, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := archive.Pack(f, srcDir); err != nil {
+		t.Fatalf("Pack: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	in, err := os.Open(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+
+	destDir := filepath.Join(tmpDir, "out")
+	if err := archive.Unpack(in, destDir); err != nil {
+		t.Fatalf("Unpack: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(destDir, "big", "big.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Errorf("streamed round trip mismatch: got %d bytes, want %d", len(got), len(body))
 	}
 }

@@ -516,7 +516,7 @@ func (a *guiApp) viewMain(c *ui.Context) {
 				case 0:
 					ui.Text(c, x.Tag).MaxLines(1).Ellipsis("…")
 				case 1:
-					ui.Text(c, formatBytes(int(x.Size)))
+					ui.Text(c, formatBytes(x.Size))
 				case 2:
 					if x.Encrypted {
 						ui.Text(c, "yes").TextColor(th.Warning)
@@ -787,7 +787,7 @@ func (a *guiApp) viewProgress(c *ui.Context) {
 	switch phase {
 	case "download":
 		if total > 0 {
-			label = fmt.Sprintf("downloading %s / %s", formatBytes(int(done)), formatBytes(int(total)))
+			label = fmt.Sprintf("downloading %s / %s", formatBytes(done), formatBytes(total))
 		} else {
 			label = "downloading"
 		}

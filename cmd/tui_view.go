@@ -148,7 +148,7 @@ func (m model) viewArtifacts(g geometry) string {
 		for i := m.scrollOff; i < len(m.visible) && i < m.scrollOff+g.tagRows; i++ {
 			a := m.visible[i]
 			body := padRight(truncate(a.Tag, g.tagW), g.tagW) + " " +
-				padLeft(formatBytes(int(a.Size)), sizeW) + " " +
+				padLeft(formatBytes(a.Size), sizeW) + " " +
 				padRight(map[bool]string{true: "enc", false: "·"}[a.Encrypted], encW)
 			if g.showVer {
 				body += " " + padRight(truncate(a.Version, g.verW), g.verW)
@@ -262,7 +262,7 @@ func (m model) detailBody(a oci.ArtifactInfo, w int) string {
 		field("repository", a.Repo),
 		field("name", a.FullName),
 		field("digest", a.Digest),
-		field("size", formatBytes(int(a.Size))),
+		field("size", formatBytes(a.Size)),
 		field("encrypted", map[bool]string{true: "yes", false: "no"}[a.Encrypted]),
 		field("version", a.Version),
 	}
