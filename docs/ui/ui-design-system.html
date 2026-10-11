@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oci-sync 界面设计方案 · TUI + GUI</title>
+<style>
+  :root{
+    --bg:#ffffff; --bg-2:#f7f7f5; --bg-3:#f1efe8;
+    --ink:#1c1c1a; --ink-2:#5f5e5a; --ink-3:#888780;
+    --line:#e2e0d8; --line-2:#d3d1c7;
+    --accent:#534ab7; --accent-soft:#eeedfe;
+    --ok:#0f6e56; --ok-soft:#e1f5ee;
+    --warn:#854f0b; --warn-soft:#faeeda;
+    --err:#a32d2d; --err-soft:#fcebeb;
+    --r-sm:6px; --r:10px; --r-lg:14px;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg-2);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:48px 32px 96px}
+
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:40px}
+  .hero .kicker{font-size:12px;color:var(--accent);letter-spacing:.06em;text-transform:uppercase;font-weight:500}
+  .hero h1{font-size:30px;font-weight:600;margin:10px 0 12px;letter-spacing:-.01em}
+  .hero p{color:var(--ink-2);margin:0;max-width:62ch;font-size:15px}
+  .hero .meta{margin-top:20px;display:flex;gap:10px;flex-wrap:wrap}
+
+  section{margin:0 0 56px}
+  h2{font-size:20px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
+  h2 .n{color:var(--ink-3);font-weight:400;margin-right:10px;font-variant-numeric:tabular-nums}
+  .lead{color:var(--ink-2);margin:0 0 22px;max-width:70ch}
+  h3{font-size:15px;font-weight:600;margin:28px 0 10px}
+
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:3px 10px;border-radius:99px;background:var(--bg);border:1px solid var(--line-2);color:var(--ink-2)}
+  .chip.ok{background:var(--ok-soft);border-color:#9fe1cb;color:var(--ok)}
+  .chip.warn{background:var(--warn-soft);border-color:#fac775;color:var(--warn)}
+  .chip.err{background:var(--err-soft);border-color:#f7c1c1;color:var(--err)}
+  .chip.accent{background:var(--accent-soft);border-color:#cecbf6;color:var(--accent)}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  th{text-align:left;font-weight:600;padding:11px 14px;background:var(--bg-3);border-bottom:1px solid var(--line-2);font-size:12px;color:var(--ink-2)}
+  td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--bg-3);padding:2px 6px;border-radius:4px;color:#3c3489}
+  td code{white-space:nowrap}
+
+  /* ── TUI mock ───────────────────────────── */
+  .tui{background:#15151a;border-radius:var(--r-lg);padding:16px;overflow-x:auto;border:1px solid #26262e}
+  .tui .term{font-family:var(--mono);font-size:12.5px;line-height:1.55;min-width:760px;color:#c8c8d0;white-space:pre}
+  .tui .term .dim{color:#6b6b78}
+  .tui .term .acc{color:#8b83e6}
+  .tui .term .ok{color:#5dcaa5}
+  .tui .term .warn{color:#ef9f27}
+  .tui .term .hl{background:#2b2b36;color:#eaeaf0;border-radius:3px}
+  .tui .term .box{color:#5d5d6b}
+  .tcols{display:grid;grid-template-columns:280px 1fr;gap:14px;margin-top:10px}
+  .tpane{border:1px solid #3a3a46;border-radius:8px;padding:10px 12px;overflow:hidden}
+  .tpane.on{border-color:#8b83e6;border-width:1.5px}
+  .tpane h5{font-family:var(--mono);font-size:12.5px;margin:0 0 9px;color:#6b6b78;font-weight:400}
+  .tpane.on h5{color:#8b83e6}
+  .tpane .row{display:flex;font-family:var(--mono);font-size:12.5px;line-height:1.75;color:#c8c8d0;gap:10px}
+  .tpane .row .tag{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tpane .row .sz{width:78px;text-align:right;color:#a8a8b4;font-variant-numeric:tabular-nums}
+  .tpane .row .enc{width:32px}
+  .tpane .row .ver{width:48px;color:#6b6b78}
+  .tpane .row .idx{width:18px;color:#4e4e5a}
+  .tpane .row.sel{background:#2b2b36;color:#eaeaf0;border-radius:3px;margin:0 -4px;padding:0 4px}
+  .tpane .row.sel .sz,.tpane .row.sel .ver{color:#c8c8d0}
+  .thead{color:#5b5b68 !important;margin-top:2px}
+  .tpane .foot{margin-top:8px;font-family:var(--mono);font-size:12px;color:#4e4e5a}
+  .tui-bar{display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding:0 4px;font-size:12px;color:var(--ink-3)}
+
+  /* ── GUI mock ───────────────────────────── */
+  .gui-frame{background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r-lg);overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .gui-title{height:30px;background:var(--bg-3);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:7px;padding:0 12px}
+  .gui-title i{width:11px;height:11px;border-radius:99px;background:var(--line-2);display:block}
+  .gui-title span{margin-left:8px;font-size:11.5px;color:var(--ink-3)}
+  .gui-body{display:grid;grid-template-columns:210px 1fr;font-size:13px}
+  .g-toolbar{grid-column:1/-1;display:flex;align-items:center;gap:10px;padding:11px 16px;background:var(--bg-3);border-bottom:1px solid var(--line)}
+  .g-brand{font-weight:600;font-size:14px}
+  .g-search{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .g-input{background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:5px 10px;color:var(--ink-3);font-size:12.5px;min-width:170px}
+  .g-input.focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(83,74,183,.12)}
+  .btn{font-size:12.5px;padding:5px 12px;border-radius:var(--r-sm);border:1px solid var(--line-2);background:var(--bg);color:var(--ink);white-space:nowrap}
+  .btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.dan{color:var(--err);border-color:#f0b8b8;background:var(--bg)}
+  .btn:disabled{opacity:.45}
+  .g-side{border-right:1px solid var(--line);padding:14px 10px;background:var(--bg-2);min-height:330px}
+  .g-side h4{font-size:11.5px;color:var(--ink-2);margin:0 0 10px;padding-left:6px;font-weight:600;letter-spacing:.02em}
+  .srow{padding:7px 9px;border-radius:var(--r-sm);margin-bottom:2px}
+  .srow .top{display:flex;align-items:center;gap:8px}
+  .srow .nm{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .srow .cnt{margin-left:auto;font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums;flex-shrink:0}
+  .srow.on{background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--accent)}
+  .srow.on .nm{color:var(--accent)}
+  .srow .sub{font-size:11px;color:var(--ink-3);display:block;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+  .g-main{padding:16px;display:flex;flex-direction:column;min-height:330px}
+  .g-main h3{margin:0 0 12px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:10px}
+  .g-main h3 .sub{font-size:12px;color:var(--ink-2);font-weight:400;font-family:var(--mono)}
+  .tbl{border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;font-size:12.5px}
+  .tr{display:grid;grid-template-columns:1fr 90px 62px 78px;border-bottom:1px solid var(--line)}
+  .tr:last-child{border-bottom:none}
+  .tr>div{padding:8px 11px}
+  .tr.th{background:var(--bg-3);font-size:11.5px;color:var(--ink-2);font-weight:600}
+  .tr.on{background:var(--accent-soft)}
+  .tr.on>div:first-child{box-shadow:inset 2px 0 0 var(--accent);font-weight:500}
+  .r{text-align:right;font-variant-numeric:tabular-nums}
+  .enc-y{color:var(--warn);font-weight:600}
+  .enc-n{color:var(--ink-3)}
+  .g-actions{margin-top:auto;padding-top:14px;display:flex;align-items:center;gap:8px;border-top:1px solid var(--line)}
+  .g-actions .hint{margin-left:auto;font-size:12px;color:var(--ink-3)}
+  .g-status{padding:9px 16px;background:var(--bg-2);border-top:1px solid var(--line);font-size:12px;color:var(--ink-2);display:flex;align-items:center;gap:8px}
+
+  /* modal overlay demo */
+  .gui-frame.ov{position:relative}
+  .gui-frame.ov::after{content:"";position:absolute;inset:30px 0 0;background:rgba(28,28,26,.34)}
+  .modal{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);z-index:2;width:430px;background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r);box-shadow:0 8px 24px rgba(0,0,0,.14);padding:18px}
+  .modal h4{margin:0 0 4px;font-size:14px;font-weight:600}
+  .modal p.sub{margin:0 0 14px;font-size:12.5px;color:var(--ink-2)}
+  .fld{margin-bottom:12px}
+  .fld label{display:block;font-size:12px;color:var(--ink-2);margin-bottom:5px}
+  .fld .val{border:1px solid var(--accent);box-shadow:0 0 0 3px rgba(83,74,183,.12);border-radius:var(--r-sm);padding:6px 10px;font-size:13px}
+  .fld.bad .val{border-color:var(--err);box-shadow:0 0 0 3px rgba(163,45,45,.1)}
+  .fld .msg{font-size:11.5px;color:var(--err);margin-top:4px}
+  .fld .hint2{font-size:11.5px;color:var(--ink-3);margin-top:4px}
+  .modal-foot{display:flex;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+  .modal-foot .btn{margin-left:auto}
+  .modal-foot .btn+.btn{margin-left:0}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  .grid2>*{min-width:0}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+  .card{background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+  .card h4{margin:0 0 10px;font-size:14px;font-weight:600}
+  .card p{margin:0;font-size:13px;color:var(--ink-2)}
+  .kbd{font-family:var(--mono);font-size:12px;border:1px solid var(--line-2);border-bottom-width:2px;border-radius:5px;padding:2px 6px;background:var(--bg-3);color:var(--ink)}
+  .ul{margin:0;padding-left:20px;font-size:13px;color:var(--ink-2)}
+  .ul li{margin-bottom:6px}
+  footer{margin-top:64px;padding-top:24px;border-top:1px solid var(--line);color:var(--ink-3);font-size:12.5px}
+  @media(prefers-reduced-motion:no-preference){.bar{animation:fill 1.4s ease-out}@keyframes fill{from{width:0}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">UI Designer · 设计规范</div>
+  <h1>oci-sync 界面设计方案</h1>
+  <p>TUI 与 GUI 共用一套信息架构与视觉语言：仓库 → 产物 → 动作 → 详情。补齐推送入口、统一动作作用域、让破坏性操作有明确的确认边界。</p>
+  <div class="meta">
+    <span class="chip accent">oci-sync 0.7.0</span>
+    <span class="chip ok">WCAG AA 对比度达标</span>
+    <span class="chip">双端同构</span>
+    <span class="chip warn">键盘优先</span>
+  </div>
+</header>
+
+<!-- 1 设计基础 -->
+<section>
+  <h2><span class="n">01</span>设计基础</h2>
+  <p class="lead">TUI 只能用 8/16 色的 ANSI 调色板，GUI 有完整 RGB 主题。两者不能共用一套颜色定义，但必须共用语义——同一个状态在任何一端都是同一个颜色角色。</p>
+
+  <h3>语义色对照</h3>
+  <table>
+    <thead><tr><th style="width:130px">语义</th><th>TUI</th><th>GUI（light）</th><th>用在哪</th><th>对比度</th></tr></thead>
+    <tbody>
+      <tr><td><b>强调 / 焦点</b></td><td><code>ANSI 5</code> 紫</td><td><code>#534AB7</code></td><td>当前焦点栏、选中行、主按钮</td><td><span class="chip ok">6.9:1</span></td></tr>
+      <tr><td><b>次要文字</b></td><td><code>ANSI 8</code></td><td><code>#5F5E5A</code></td><td>表头、单位、repo 次行</td><td><span class="chip ok">≥4.8:1</span></td></tr>
+      <tr><td><b>成功</b></td><td><code>ANSI 2</code> 绿</td><td><code>#0F6E56</code></td><td>未加密、成功 toast</td><td><span class="chip ok">5.4:1</span></td></tr>
+      <tr><td><b>警示 / 加密</b></td><td><code>ANSI 3</code> 黄</td><td><code>#854F0B</code></td><td>加密标记、口令提示</td><td><span class="chip warn">校正后 ≥4.5:1</span></td></tr>
+      <tr><td><b>危险 / 删除</b></td><td><code>ANSI 1</code> 红</td><td><code>#A32D2D</code></td><td>删除确认、失败信息</td><td><span class="chip ok">7.0:1</span></td></tr>
+    </tbody>
+  </table>
+
+  <h3>字阶与间距</h3>
+  <div class="grid2">
+    <div class="card">
+      <h4>字阶（4px 基数）</h4>
+      <p style="font-size:20px;font-weight:600;margin:6px 0">仓库标题 20 / 600</p>
+      <p style="font-size:15px;font-weight:600;margin:6px 0">栏目标题 15 / 600</p>
+      <p style="margin:6px 0;font-size:13px">表格正文 13 / 400</p>
+      <p style="margin:6px 0;font-size:12px;color:var(--ink-2)">辅助说明 12 / 400（不低于 AA 4.5:1）</p>
+      <p style="margin:6px 0;font-size:11.5px;font-family:var(--mono);color:var(--ink-3)">digest 等宽 11.5 / 400</p>
+    </div>
+    <div class="card">
+      <h4>间距（4 / 8 / 12 / 16 / 24 / 32）</h4>
+      <p>表格行高 <b>36px</b>（GUI）；行内元素间距 <b>8px</b></p>
+      <p>栏间距 <b>16px</b>；区块间距 <b>24px</b></p>
+      <p>弹窗内边距 <b>20px</b>，字段间距 <b>12px</b></p>
+      <p>最小点击目标 <b>32×32</b>（含 44px 热区扩展）</p>
+    </div>
+  </div>
+</section>
+
+<!-- 2 信息架构 -->
+<section>
+  <h2><span class="n">02</span>信息架构</h2>
+  <p class="lead">现有 TUI 只有 pull / delete，GUI 才有 push——同一个工具两套心智模型，用户在终端里发现「推不上去」。方案把三个动作并列成一个动作区，并明确各自的作用域。</p>
+  <table>
+    <thead><tr><th style="width:110px">层级</th><th style="width:200px">承载</th><th>设计要点</th></tr></thead>
+    <tbody>
+      <tr><td><b>① 仓库层</b></td><td>左栏 shortcut 列表</td><td>名称为主、repo 路径为辅；行尾角标显示已加载的 artifact 数，避免切换后数一下。窄屏折叠为单栏时，顶部保留面包屑可返回。</td></tr>
+      <tr><td><b>② 产物层</b></td><td>主栏表格</td><td>四列固定语义：标签 / 大小 / 加密 / 版本。加密列是唯一值得在扫视中被一眼捕捉的信息，用警示色 + 加粗，其余保持安静。</td></tr>
+      <tr><td><b>③ 动作区</b></td><td>表格下方</td><td><b>推送</b>作用域是仓库（未选中行也可用）；<b>拉取 / 删除</b>作用域是行。作用域不同必须在视觉上区分，否则会出现「为什么这里推不了」。</td></tr>
+      <tr><td><b>④ 详情</b></td><td>弹窗 / 抽屉</td><td>展示 digest、标签、上传时间；并支持就地增删标签——原来只能读标签却不能改，是最明显的能力缺口。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 3 TUI -->
+<section>
+  <h2><span class="n">03</span>TUI 设计稿</h2>
+  <p class="lead">全屏双栏，焦点恒定在一栏，弹窗接管键盘。视觉上用圆角边框的明暗区分焦点，而不是靠文字颜色——边框粗细变化在终端里比换色更容易被余光捕捉。</p>
+
+  <div class="tui">
+    <div class="term"><span class="hl">  oci-sync  </span>  <span class="dim">ghcr.io/acme/configs</span>            <span class="dim">14 tags</span></div>
+
+    <div class="tcols">
+      <div class="tpane">
+        <h5>Shortcuts</h5>
+        <div class="row sel"><span class="idx">▸</span><span class="tag">configs</span></div>
+        <div class="row"><span class="idx"></span><span class="tag">mirror</span></div>
+        <div class="row"><span class="idx"></span><span class="tag">datasets</span></div>
+        <div class="row"><span class="idx"></span><span class="tag">models</span></div>
+        <div class="foot">ghcr.io/acme/configs · 14</div>
+      </div>
+      <div class="tpane on">
+        <h5>Artifacts · ghcr.io/acme/configs</h5>
+        <div class="row thead"><span class="idx"></span><span class="tag">TAG</span><span class="sz">SIZE</span><span class="enc">ENC</span><span class="ver">VER</span></div>
+        <div class="row sel"><span class="idx">▸</span><span class="tag">v2.1.0</span><span class="sz">14.2 MB</span><span class="enc warn">enc</span><span class="ver">0.7.0</span></div>
+        <div class="row"><span class="idx"></span><span class="tag">v2.0.4</span><span class="sz">13.8 MB</span><span class="enc">·</span><span class="ver">0.7.0</span></div>
+        <div class="row"><span class="idx"></span><span class="tag">v2.0.4-linux-amd64</span><span class="sz">28.1 MB</span><span class="enc warn">enc</span><span class="ver">0.7.0</span></div>
+        <div class="row"><span class="idx"></span><span class="tag">nightly</span><span class="sz">412.0 KB</span><span class="enc">·</span><span class="ver">0.6.9</span></div>
+        <div class="row"><span class="idx"></span><span class="tag">latest</span><span class="sz">14.2 MB</span><span class="enc">·</span><span class="ver">0.7.0</span></div>
+        <div class="row"><span class="idx"></span><span class="tag">v1.9.2</span><span class="sz">8.1 MB</span><span class="enc">·</span><span class="ver">0.6.2</span></div>
+        <div class="foot">7 of 14 shown</div>
+      </div>
+    </div>
+
+    <div class="term" style="margin-top:10px"><span class="dim">↑/k ↓/j: navigate · enter: open · tab: pane · P: push · p: pull · d: delete · ?: help · q: quit</span></div>
+    <div class="tui-bar"><span>焦点在 Artifacts · 加粗边框 = 当前栏</span><span>≥ 48 × 12 可渲染</span></div>
+  </div>
+
+  <h3>键位表</h3>
+  <table>
+    <thead><tr><th style="width:150px">按键</th><th style="width:110px">作用域</th><th>行为</th></tr></thead>
+    <tbody>
+      <tr><td><span class="kbd">↑</span> <span class="kbd">↓</span> / <span class="kbd">k</span> <span class="kbd">j</span></td><td>当前栏</td><td>上下移动，同时更新详情预览</td></tr>
+      <tr><td><span class="kbd">Tab</span> <span class="kbd">1</span> <span class="kbd">2</span></td><td>全局</td><td>切换仓库 / 产物栏焦点</td></tr>
+      <tr><td><span class="kbd">Enter</span></td><td>仓库栏</td><td>加载该仓库 tag 列表</td></tr>
+      <tr><td><span class="kbd">Enter</span></td><td>产物栏</td><td>打开详情</td></tr>
+      <tr><td><span class="kbd">P</span></td><td>仓库</td><td><b>新增</b>：打开推送表单</td></tr>
+      <tr><td><span class="kbd">p</span></td><td>产物行</td><td>拉取到本地路径</td></tr>
+      <tr><td><span class="kbd">d</span></td><td>产物行</td><td>删除，确认弹窗默认 No</td></tr>
+      <tr><td><span class="kbd">e</span></td><td>产物行</td><td><b>新增</b>：编辑该artifact 的标签</td></tr>
+      <tr><td><span class="kbd">/</span></td><td>全局</td><td>按 tag 过滤（smart-case）</td></tr>
+      <tr><td><span class="kbd">s</span></td><td>产物栏</td><td><b>新增</b>：切换排序（时间 / 大小 / 标签）</td></tr>
+      <tr><td><span class="kbd">r</span></td><td>全局</td><td>重新加载</td></tr>
+      <tr><td><span class="kbd">Esc</span></td><td>分层</td><td>执行中=取消；弹窗=关闭；浏览=回仓库栏</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:13px;color:var(--ink-2);margin-top:10px">
+    <b>刻意让 <span class="kbd">P</span> 与 <span class="kbd">p</span> 大小写区分</b>：三个动词里 push 是最高频也最容易敲错的一个，
+    与 pull 同键会让肌肉记忆造成误操作。同理 <span class="kbd">d</span> 删除与 <span class="kbd">e</span> 编辑分开。
+  </p>
+</section>
+
+<!-- 4 GUI -->
+<section>
+  <h2><span class="n">04</span>GUI 设计稿</h2>
+  <p class="lead">窗口最小 720 × 420。左栏 210px 固定，主栏自适应。底部常驻状态条，让「上次做了什么」不必再开 recent 命令。</p>
+
+  <div class="gui-frame">
+    <div class="gui-title"><i></i><i></i><i></i><span>oci-sync</span></div>
+    <div class="gui-body">
+      <div class="g-toolbar">
+        <span class="g-brand">oci-sync</span>
+        <span class="g-search">
+          <span style="font-size:12.5px;color:var(--ink-2)">过滤</span>
+          <span class="g-input focus">tag 包含…</span>
+          <span class="btn">刷新</span>
+        </span>
+      </div>
+
+      <div class="g-side">
+        <h4>快捷方式</h4>
+        <div class="srow on"><div class="top"><span class="nm">configs</span><span class="cnt">14</span></div><span class="sub">ghcr.io/acme/configs</span></div>
+        <div class="srow"><div class="top"><span class="nm">mirror</span><span class="cnt">3</span></div><span class="sub">registry.example.com/x</span></div>
+        <div class="srow"><div class="top"><span class="nm">datasets</span><span class="cnt">22</span></div><span class="sub">ghcr.io/acme/datasets</span></div>
+        <div class="srow"><div class="top"><span class="nm">models</span><span class="cnt">7</span></div><span class="sub">harbor.local/ml-models</span></div>
+      </div>
+
+      <div class="g-main">
+        <h3>ghcr.io/acme/configs <span class="sub">共 14 个 tag</span></h3>
+        <div class="tbl">
+          <div class="tr th"><div>标签</div><div class="r">大小</div><div>加密</div><div>版本</div></div>
+          <div class="tr on"><div>v2.1.0</div><div class="r">14.2 MB</div><div class="enc-y">是</div><div>0.7.0</div></div>
+          <div class="tr"><div>v2.0.4</div><div class="r">13.8 MB</div><div class="enc-n">否</div><div>0.7.0</div></div>
+          <div class="tr"><div>v2.0.4-linux-amd64</div><div class="r">28.1 MB</div><div class="enc-y">是</div><div>0.7.0</div></div>
+          <div class="tr"><div>nightly</div><div class="r">412.0 KB</div><div class="enc-n">否</div><div>0.6.9</div></div>
+          <div class="tr"><div>latest</div><div class="r">14.2 MB</div><div class="enc-n">否</div><div>0.7.0</div></div>
+          <div class="tr"><div>v1.9.2</div><div class="r">8.1 MB</div><div class="enc-n">否</div><div>0.6.2</div></div>
+        </div>
+        <div class="g-actions">
+          <span class="btn">推送…</span>
+          <span class="btn pri">拉取…</span>
+          <span class="btn dan">删除…</span>
+          <span class="btn">编辑标签…</span>
+          <span class="hint">已选中 v2.1.0 · 14.2 MB · 已加密</span>
+        </div>
+      </div>
+      <div class="g-status" style="grid-column:1/-1">
+        <span style="color:var(--ok)">●</span> 14:32 已推送 configs:v2.1.0（14.2 MB，已加密）
+        <span style="margin-left:auto;color:var(--ink-3)">窗口 1024 × 640</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>推送表单（新增，作用于仓库）</h3>
+  <div class="gui-frame ov">
+    <div class="gui-title"><i></i><i></i><i></i><span>推送 artifact</span></div>
+    <div style="height:300px"></div>
+    <div class="modal">
+      <h4>推送到 ghcr.io/acme/configs</h4>
+      <p class="sub">文件或目录均可，加密后仅持有口令者可读取</p>
+      <div class="fld"><label>源路径（文件或目录）</label><div class="val">C:\project\dist\</div><div class="hint2">选择文件 / 选择目录</div></div>
+      <div class="fld"><label>标签名</label><div class="val">v2.2.0</div></div>
+      <div class="fld bad"><label>加密口令</label><div class="val">••••••••</div><div class="msg">已加密，请填写口令（至少 8 位）</div></div>
+      <div class="fld"><label>自定义标签（每行一个 key=value）</label><div class="val" style="min-height:44px;font-family:var(--mono);font-size:12px;color:var(--ink-2)">env=prod<br>build=2091</div></div>
+      <div class="modal-foot"><span class="btn">取消</span><span class="btn">继续</span><span class="btn pri">推送</span></div>
+    </div>
+  </div>
+  <p style="font-size:13px;color:var(--ink-2);margin-top:12px">
+    校验采用<b>并联而非串行</b>：一次提交同时校验全部字段，逐条红字贴在对应输入框下方，主按钮保持可用——
+    让用户看到「还差什么」，而不是点一次换一个错误。口令已加密但留空时，主按钮置灰并就地说明原因。
+  </p>
+</section>
+
+<!-- 5 状态 -->
+<section>
+  <h2><span class="n">05</span>状态设计</h2>
+  <p class="lead">空、错、忙三态是这个工具最高频的界面状态——因为它绝大部分时间在等网络往返。</p>
+  <table>
+    <thead><tr><th style="width:100px">状态</th><th style="width:180px">文案原则</th><th>示例与处理</th></tr></thead>
+    <tbody>
+      <tr><td><b>空</b></td><td>说清原因 + 给出下一步</td><td>「此仓库还没有 artifact」→ 紧跟一个主行动按钮「推送…」。不写「暂无数据」这种死胡同文案。</td></tr>
+      <tr><td><b>空（被过滤）</b></td><td>与真空态区分开</td><td>「没有 tag 匹配 “v3”」+ 清除过滤的链接。不能和「仓库为空」共用一句话。</td></tr>
+      <tr><td><b>加载</b></td><td>不让布局跳动</td><td>表格区显示 6 行骨架行而非 spinner 居中，避免刷新时高度塌陷再撑开。</td></tr>
+      <tr><td><b>错误</b></td><td>给原因 + 给出路</td><td>「认证失败：凭据已过期 → 重新登录」；网络超时给重试按钮并保留当前选中行。</td></tr>
+      <tr><td><b>进行中</b></td><td>可见可取消</td><td>阶段名 + 字节计数 + 已用时，Esc 随时可撤。取消后回到原上下文，不重置选择。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 6 交互原则 -->
+<section>
+  <h2><span class="n">06</span>交互原则</h2>
+  <div class="grid2">
+    <div class="card">
+      <h4>破坏性操作</h4>
+      <ul class="ul">
+        <li>删除必须二次确认，且<b>默认焦点在「否」</b></li>
+        <li>确认框显示完整 <code>repo:tag</code>，不用缩写</li>
+        <li>文案写明不可撤销的后果，不写「确定吗？」</li>
+        <li>危险按钮与其他按钮保持 ≥8px 间距，防误触</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>信息呈现</h4>
+      <ul class="ul">
+        <li>大小用人类可读单位，digest 走等宽字体</li>
+        <li>加密状态用<b>文字 + 颜色</b>双通道，不靠颜色单独表意</li>
+        <li>时间用相对时间（3 小时前），绝对时间放详情</li>
+        <li>路径过长中间省略，保留首尾可辨认部分</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>键盘与可达性</h4>
+      <ul class="ul">
+        <li>TUI 全流程可纯键盘完成，无鼠标依赖</li>
+        <li>焦点环始终可见，对比度 ≥3:1</li>
+        <li>GUI 弹窗打开时焦点锁定在弹窗内</li>
+        <li>Tab 顺序：工具栏 → 仓库 → 表格 → 动作</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>响应式</h4>
+      <ul class="ul">
+        <li>TUI &lt;76 列折叠单栏，保留面包屑</li>
+        <li>GUI &lt;860px 左栏收为下拉选择器</li>
+        <li>最小 720×420 下弹窗字段全部在视口内</li>
+        <li>表格列按可用宽度依次隐藏「版本 → 加密」</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 7 落地 -->
+<section>
+  <h2><span class="n">07</span>落地优先级</h2>
+  <table>
+    <thead><tr><th style="width:64px">级别</th><th style="width:200px">事项</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><span class="chip err">P0</span></td><td>TUI 补齐推送入口</td><td>能力对齐 GUI，复用 <code>runPush</code>，与 pull 同样走弹窗表单</td></tr>
+      <tr><td><span class="chip err">P0</span></td><td>GUI 标签可编辑</td><td>详情里增删 labels，复用 <code>runLabel</code></td></tr>
+      <tr><td><span class="chip err">P0</span></td><td>真三态文案 + 重试</td><td>空/过滤空/错误三态分开，错误带重试</td></tr>
+      <tr><td><span class="chip warn">P1</span></td><td>骨架加载态</td><td>消除刷新时布局跳动</td></tr>
+      <tr><td><span class="chip warn">P1</span></td><td>排序能力</td><td>按大小 / 时间 / 标签排序，TUI 用 <span class="kbd">s</span></td></tr>
+      <tr><td><span class="chip">P2</span></td><td>仓库搜索</td><td>shortcut 多时的必要检索</td></tr>
+      <tr><td><span class="chip">P2</span></td><td>活动历史面板</td><td>GUI 内可视 recent，底部状态条已铺路</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  oci-sync UI 设计规范 · 2026-10-11 · 双端共享骨架，TUI 与 GUI 仅在渲染层分化<br>
+  落地需同步更新 <code>docs/design.md</code> 与 <code>FEATURE.md</code>；新增中文文案后重跑 <code>cmd</code> 布局回归测试。
+</footer>
+
+</div>
+</body>
+</html>
