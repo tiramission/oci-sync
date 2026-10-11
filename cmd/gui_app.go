@@ -20,6 +20,11 @@ import (
 // every remote call runs in a goroutine that hands its result back through
 // Window.Update. Triggering work from rendering code would fire it several
 // times per click.
+//
+// Every string the user reads is written in Chinese, including validation
+// errors shown inside a dialog. The CLI stays English (see AGENTS.md), so
+// these literals live here rather than in a shared table: an error crossing
+// between the two would have to pick one language or carry both.
 
 // guiOpKind is the operation a modal is driving, if any.
 type guiOpKind int
@@ -175,7 +180,7 @@ func runGui(ctx context.Context) error {
 
 	shortcuts := config.GetAllShortcuts()
 	if len(shortcuts) == 0 {
-		fmt.Println("No shortcuts configured. Use 'oci-sync alias add <name> --repo <repo>' to add one first.")
+		fmt.Println("尚未配置任何快捷方式。请先执行 'oci-sync alias add <名称> --repo <仓库>' 添加一个。")
 		return nil
 	}
 
@@ -396,15 +401,15 @@ func (a *guiApp) viewToolbar(c *ui.Context) {
 		ui.Text(c, "oci-sync").Bold().FontSize(15)
 
 		ui.Row(c).Grow(1).Gap(8).Justify(ui.End).Children(func() {
-			ui.Text(c, "Filter").TextColor(th.TextMuted)
+			ui.Text(c, "过滤").TextColor(th.TextMuted)
 			ui.TextInput(c, &a.filter).
-				Placeholder("tag contains…").
+				Placeholder("tag 包含…").
 				SingleLine().
 				Width(220)
 			if a.loading {
-				ui.Text(c, "Loading…").TextColor(th.TextMuted)
+				ui.Text(c, "加载中…").TextColor(th.TextMuted)
 			}
-			if ui.Button(c, "Refresh").Clicked() {
+			if ui.Button(c, "刷新").Clicked() {
 				a.refresh()
 			}
 		})
@@ -416,7 +421,7 @@ func (a *guiApp) viewSidebar(c *ui.Context) {
 	// The list has to Grow and the column FillHeight, or the list takes its
 	// natural height and pushes the rest of the window out of view.
 	ui.Column(c).FillHeight().Width(220).Gap(6).Padding(10).Children(func() {
-		ui.Text(c, "SHORTCUTS").TextColor(th.TextMuted).FontSize(11)
+		ui.Text(c, "快捷方式").TextColor(th.TextMuted).FontSize(11)
 
 		list := ui.List(c, &a.navList, len(a.shortcuts))
 		list.ItemKey(func(row int) any {
@@ -486,7 +491,7 @@ func (a *guiApp) viewMain(c *ui.Context) {
 			head = a.currentShortcut().Repo
 		}
 		rows := a.guiVisible()
-		ui.Text(c, fmt.Sprintf("%s — %d tag(s)", head, len(rows))).TextColor(th.TextMuted)
+		ui.Text(c, fmt.Sprintf("%s — 共 %d 个 tag", head, len(rows))).TextColor(th.TextMuted)
 
 		// Exactly one of these takes the room the header and the action row
 		// leave. Without Grow/FillHeight on the table it would claim its
@@ -494,21 +499,23 @@ func (a *guiApp) viewMain(c *ui.Context) {
 		// where they cannot be clicked.
 		switch {
 		case a.listErr != nil:
-			ui.Text(c, "Cannot list tags: "+a.listErr.Error()).TextColor(th.Danger)
+			ui.Text(c, "无法列出 tag："+a.listErr.Error()).TextColor(th.Danger)
 			ui.Spacer(c)
 		case a.loading && len(rows) == 0:
-			ui.Text(c, "Loading…").TextColor(th.TextMuted)
+			ui.Text(c, "加载中…").TextColor(th.TextMuted)
 			ui.Spacer(c)
 		case len(rows) == 0:
-			ui.Text(c, "No artifacts. Push one with 'oci-sync push', or clear the filter.").
+			ui.Text(c, "暂无 artifact。可用 'oci-sync push' 推送一个，或清除过滤条件。").
 				TextColor(th.TextMuted)
 			ui.Spacer(c)
 		default:
+			// Chinese headers are two cells wide per character, so each
+			// title needs a little more room than its English original did.
 			cols := []ui.TableColumn{
-				{Title: "TAG", ID: "tag", Width: 240},
-				{Title: "SIZE", ID: "size", Width: 100, Align: ui.End},
-				{Title: "ENC", ID: "enc", Width: 60},
-				{Title: "VERSION", ID: "version", Width: 90},
+				{Title: "标签", ID: "tag", Width: 240},
+				{Title: "大小", ID: "size", Width: 100, Align: ui.End},
+				{Title: "加密", ID: "enc", Width: 60},
+				{Title: "版本", ID: "version", Width: 90},
 			}
 			ui.Table(c, &a.tableList, cols, len(rows), func(row, col int) {
 				x := rows[row]
@@ -519,9 +526,9 @@ func (a *guiApp) viewMain(c *ui.Context) {
 					ui.Text(c, formatBytes(x.Size))
 				case 2:
 					if x.Encrypted {
-						ui.Text(c, "yes").TextColor(th.Warning)
+						ui.Text(c, "是").TextColor(th.Warning)
 					} else {
-						ui.Text(c, "no").TextColor(th.TextMuted)
+						ui.Text(c, "否").TextColor(th.TextMuted)
 					}
 				case 3:
 					ui.Text(c, x.Version)
@@ -538,21 +545,21 @@ func (a *guiApp) viewActions(c *ui.Context) {
 	ui.Row(c).Gap(8).Children(func() {
 		// Push targets the repository rather than a row, so it stays
 		// available when nothing is selected.
-		if ui.Button(c, "Push…").Clicked() {
+		if ui.Button(c, "推送…").Clicked() {
 			a.openPushModal()
 		}
 
 		x, ok := a.selectedArtifact()
 		if !ok {
-			ui.Text(c, "Select a tag to pull or delete.").TextColor(th.TextMuted)
+			ui.Text(c, "请选择一个 tag 以拉取或删除。").TextColor(th.TextMuted)
 			return
 		}
-		if ui.PrimaryButton(c, "Pull…").Clicked() {
+		if ui.PrimaryButton(c, "拉取…").Clicked() {
 			a.openPullModal(x)
 		}
 		// ButtonBase has no danger look of its own, so the destructive
 		// action is a plain button painted with the theme's Danger.
-		if a.dangerButton(c, "Delete…").Clicked() {
+		if a.dangerButton(c, "删除…").Clicked() {
 			a.openDeleteModal(x)
 		}
 	})
@@ -579,8 +586,8 @@ func (a *guiApp) openPullModal(x oci.ArtifactInfo) {
 		kind:    guiOpPull,
 		tag:     x.Tag,
 		repo:    shortcut,
-		title:   "Pull " + x.Tag,
-		confirm: "Pull",
+		title:   "拉取 " + x.Tag,
+		confirm: "拉取",
 		// Land beside the working directory rather than in the registry's
 		// namespace, which is rarely what the user wants to untar into.
 		destPath: "./" + x.Tag,
@@ -596,8 +603,8 @@ func (a *guiApp) openDeleteModal(x oci.ArtifactInfo) {
 		kind:    guiOpDelete,
 		tag:     x.Tag,
 		repo:    a.currentShortcut().Name,
-		title:   "Delete " + x.Tag,
-		confirm: "Delete",
+		title:   "删除 " + x.Tag,
+		confirm: "删除",
 	}
 	a.modalOpen = true
 }
@@ -608,8 +615,8 @@ func (a *guiApp) openPushModal() {
 	a.modal = guiModal{
 		kind:    guiOpPush,
 		repo:    a.currentShortcut().Name,
-		title:   "Push to " + a.currentShortcut().Repo,
-		confirm: "Push",
+		title:   "推送到 " + a.currentShortcut().Repo,
+		confirm: "推送",
 		// The tag has to be typed: there is nothing on the remote side to
 		// suggest one, and overwriting a tag by accident is worse than
 		// typing it out.
@@ -636,18 +643,22 @@ func (m *guiModal) pushLabels() []string {
 // than surfacing later as an opaque error from the registry round trip.
 func (m *guiModal) validatePush() error {
 	if strings.TrimSpace(m.srcPath) == "" {
-		return errors.New("choose a file or directory to push")
+		return errors.New("请选择要推送的文件或目录")
 	}
 	if strings.TrimSpace(m.tag) == "" {
-		return errors.New("tag cannot be empty")
+		return errors.New("tag 不能为空")
 	}
 	if strings.ContainsAny(m.tag, " \t") {
-		return fmt.Errorf("tag %q cannot contain spaces", m.tag)
+		return fmt.Errorf("tag %q 不能包含空格", m.tag)
 	}
 	// Labels go through the same parser the CLI uses, so a malformed one is
-	// rejected here instead of being silently dropped there.
+	// rejected here instead of being silently dropped there. The parser's own
+	// message stays English — it is shared with the CLI, which is English by
+	// convention — so the Chinese sentence around it is what the user reads
+	// first. Re-implementing the check here just to translate it would be a
+	// second source of truth for the same rule.
 	if _, err := parseLabels(m.pushLabels(), true); err != nil {
-		return err
+		return fmt.Errorf("标签有误：%w", err)
 	}
 	return nil
 }
@@ -661,7 +672,7 @@ func (a *guiApp) browse(dest *string, dirs bool) {
 	go func() {
 		picked, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 			Parent:      win,
-			Title:       "Choose a path",
+			Title:       "选择路径",
 			Directory:   dirs,
 			DefaultPath: *dest,
 		})
@@ -693,22 +704,22 @@ func (a *guiApp) viewModal(c *ui.Context) {
 
 				switch m.kind {
 				case guiOpPull:
-					ui.Text(c, "Destination").TextColor(th.TextMuted)
+					ui.Text(c, "目标路径").TextColor(th.TextMuted)
 					ui.Row(c).Gap(8).Children(func() {
 						ui.TextInput(c, &m.destPath).Grow(1).SingleLine()
-						if ui.Button(c, "Browse…").Clicked() {
+						if ui.Button(c, "浏览…").Clicked() {
 							a.browse(&m.destPath, true)
 						}
 					})
 					if m.passphraseShown {
-						ui.Text(c, "Passphrase").TextColor(th.TextMuted)
+						ui.Text(c, "密码").TextColor(th.TextMuted)
 						ui.TextInput(c, &m.passphrase).Password().SingleLine()
 					}
 				case guiOpPush:
-					ui.Text(c, "Source").TextColor(th.TextMuted)
+					ui.Text(c, "源路径").TextColor(th.TextMuted)
 					ui.Row(c).Gap(8).Children(func() {
 						ui.TextInput(c, &m.srcPath).Grow(1).SingleLine()
-						if ui.Button(c, "Browse…").Clicked() {
+						if ui.Button(c, "浏览…").Clicked() {
 							a.browse(&m.srcPath, false)
 						}
 					})
@@ -719,21 +730,21 @@ func (a *guiApp) viewModal(c *ui.Context) {
 					// Pushing unencrypted is the common case, so the key field
 					// sits behind a toggle and stays empty until asked for.
 					encrypt := m.passphraseShown
-					if ui.Toggle(c, &encrypt, "Encrypt").Changed() {
+					if ui.Toggle(c, &encrypt, "加密").Changed() {
 						m.passphraseShown = encrypt
 						if !encrypt {
 							m.passphrase = ""
 						}
 					}
 					if m.passphraseShown {
-						ui.Text(c, "Passphrase").TextColor(th.TextMuted)
+						ui.Text(c, "密码").TextColor(th.TextMuted)
 						ui.TextInput(c, &m.passphrase).Password().SingleLine()
 					}
 
-					ui.Text(c, "Labels (one key=value per line)").TextColor(th.TextMuted)
+					ui.Text(c, "标签（每行一个 key=value）").TextColor(th.TextMuted)
 					ui.TextArea(c, &m.labels).Lines(2, 4).FillWidth()
 				case guiOpDelete:
-					ui.Text(c, "This removes the tag from the remote registry and cannot be undone.")
+					ui.Text(c, "这会从远程 registry 删除该 tag，且无法撤销。")
 				}
 
 				if m.busy && m.kind == guiOpPull {
@@ -745,10 +756,10 @@ func (a *guiApp) viewModal(c *ui.Context) {
 
 				ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 					if m.busy {
-						ui.Text(c, "Working…").TextColor(th.TextMuted)
+						ui.Text(c, "处理中…").TextColor(th.TextMuted)
 						return
 					}
-					if ui.Button(c, "Cancel").Clicked() {
+					if ui.Button(c, "取消").Clicked() {
 						a.closeModal()
 					}
 					label := m.confirm
@@ -783,20 +794,23 @@ func (a *guiApp) viewModal(c *ui.Context) {
 func (a *guiApp) viewProgress(c *ui.Context) {
 	th := c.Theme()
 	phase, done, total := a.progress.snapshot()
-	label := phase
+	// The phase keys come from runPull and stay English; only the label the
+	// user reads is translated, so the mapping lives here instead of being
+	// pushed down into the shared pull code.
+	label := ""
 	switch phase {
 	case "download":
 		if total > 0 {
-			label = fmt.Sprintf("downloading %s / %s", formatBytes(done), formatBytes(total))
+			label = fmt.Sprintf("下载中 %s / %s", formatBytes(done), formatBytes(total))
 		} else {
-			label = "downloading"
+			label = "下载中"
 		}
 	case "decrypt":
-		label = "decrypting"
+		label = "解密中"
 	case "unpack":
-		label = "unpacking"
+		label = "解压中"
 	case "check":
-		label = "checking"
+		label = "检查中"
 	}
 	if label == "" {
 		return

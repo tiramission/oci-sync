@@ -193,15 +193,15 @@ func TestGuiViewRendersShortcutsAndArtifacts(t *testing.T) {
 	assert.Contains(t, texts, "docs")
 	assert.Contains(t, texts, "daily")
 	assert.Contains(t, texts, "secret")
-	assert.Contains(t, texts, "yes")
-	assert.Contains(t, texts, "no")
+	assert.Contains(t, texts, "是")
+	assert.Contains(t, texts, "否")
 }
 
 func TestGuiViewShowsRepoAndTagCount(t *testing.T) {
 	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1, false), guiArtifact("weekly", 1, false))
 	tt := newGuiTester(t, a)
 
-	assert.Contains(t, tt.Texts(), "registry.example.com/me/photos — 2 tag(s)")
+	assert.Contains(t, tt.Texts(), "registry.example.com/me/photos — 共 2 个 tag")
 }
 
 func TestGuiViewFilterHidesUnrelatedTags(t *testing.T) {
@@ -212,13 +212,13 @@ func TestGuiViewFilterHidesUnrelatedTags(t *testing.T) {
 	texts := tt.Texts()
 	assert.Contains(t, texts, "weekly")
 	assert.NotContains(t, texts, "daily")
-	assert.Contains(t, texts, "registry.example.com/me/photos — 1 tag(s)")
+	assert.Contains(t, texts, "registry.example.com/me/photos — 共 1 个 tag")
 }
 
 func TestGuiViewExplainsAnEmptyTable(t *testing.T) {
 	tt := newGuiTester(t, guiTestApp())
 
-	assert.Contains(t, tt.Texts(), "No artifacts. Push one with 'oci-sync push', or clear the filter.")
+	assert.Contains(t, tt.Texts(), "暂无 artifact。可用 'oci-sync push' 推送一个，或清除过滤条件。")
 }
 
 func TestGuiViewReportsAListFailure(t *testing.T) {
@@ -226,13 +226,13 @@ func TestGuiViewReportsAListFailure(t *testing.T) {
 	a.listErr = errors.New("registry unreachable")
 	tt := newGuiTester(t, a)
 
-	assert.Contains(t, tt.Texts(), "Cannot list tags: registry unreachable")
+	assert.Contains(t, tt.Texts(), "无法列出 tag：registry unreachable")
 }
 
 func TestGuiViewWithoutASelectionOffersNoActions(t *testing.T) {
 	tt := newGuiTester(t, guiTestApp())
 
-	assert.Contains(t, tt.Texts(), "Select a tag to pull or delete.")
+	assert.Contains(t, tt.Texts(), "请选择一个 tag 以拉取或删除。")
 }
 
 func TestGuiViewPullButtonOpensTheDialog(t *testing.T) {
@@ -240,14 +240,14 @@ func TestGuiViewPullButtonOpensTheDialog(t *testing.T) {
 	a.tableSel = 0
 	tt := newGuiTester(t, a)
 
-	require.NoError(t, tt.Click("Pull…"))
+	require.NoError(t, tt.Click("拉取…"))
 	require.True(t, a.modalOpen)
 	assert.Equal(t, guiOpPull, a.modal.kind)
 
 	texts := tt.Texts()
-	assert.Contains(t, texts, "Pull daily")
-	assert.Contains(t, texts, "Destination")
-	assert.NotContains(t, texts, "Passphrase", "a plain artifact needs no key")
+	assert.Contains(t, texts, "拉取 daily")
+	assert.Contains(t, texts, "目标路径")
+	assert.NotContains(t, texts, "密码", "a plain artifact needs no key")
 }
 
 func TestGuiViewPullOfEncryptedArtifactAsksForAPassphrase(t *testing.T) {
@@ -255,9 +255,9 @@ func TestGuiViewPullOfEncryptedArtifactAsksForAPassphrase(t *testing.T) {
 	a.tableSel = 0
 	tt := newGuiTester(t, a)
 
-	require.NoError(t, tt.Click("Pull…"))
+	require.NoError(t, tt.Click("拉取…"))
 
-	assert.Contains(t, tt.Texts(), "Passphrase")
+	assert.Contains(t, tt.Texts(), "密码")
 }
 
 func TestGuiViewDeleteButtonOpensTheDialog(t *testing.T) {
@@ -265,21 +265,21 @@ func TestGuiViewDeleteButtonOpensTheDialog(t *testing.T) {
 	a.tableSel = 0
 	tt := newGuiTester(t, a)
 
-	require.NoError(t, tt.Click("Delete…"))
+	require.NoError(t, tt.Click("删除…"))
 	require.True(t, a.modalOpen)
 	assert.Equal(t, guiOpDelete, a.modal.kind)
 	assert.Contains(t, tt.Texts(),
-		"This removes the tag from the remote registry and cannot be undone.")
+		"这会从远程 registry 删除该 tag，且无法撤销。")
 }
 
 func TestGuiViewCancelClosesTheDialog(t *testing.T) {
 	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1, false))
 	a.tableSel = 0
 	tt := newGuiTester(t, a)
-	require.NoError(t, tt.Click("Pull…"))
+	require.NoError(t, tt.Click("拉取…"))
 	require.True(t, a.modalOpen)
 
-	require.NoError(t, tt.Click("Cancel"))
+	require.NoError(t, tt.Click("取消"))
 	assert.False(t, a.modalOpen)
 }
 
@@ -287,7 +287,7 @@ func TestGuiViewShowsTheFailureAndStaysOpen(t *testing.T) {
 	a := guiWithArtifacts(guiTestApp(), guiArtifact("secret", 1, true))
 	a.tableSel = 0
 	tt := newGuiTester(t, a)
-	require.NoError(t, tt.Click("Pull…"))
+	require.NoError(t, tt.Click("拉取…"))
 
 	a.finishModal(errors.New("bad passphrase"))
 	tt.Frame()
@@ -300,40 +300,40 @@ func TestGuiViewProgressNamesThePullPhase(t *testing.T) {
 	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1, false))
 	a.tableSel = 0
 	tt := newGuiTester(t, a)
-	require.NoError(t, tt.Click("Pull…"))
+	require.NoError(t, tt.Click("拉取…"))
 
 	a.modal.busy = true
 	a.progress.set(PullStage{Phase: "unpack"})
 	tt.Frame()
 
-	assert.Contains(t, tt.Texts(), "unpacking")
+	assert.Contains(t, tt.Texts(), "解压中")
 }
 
 func TestGuiViewProgressReportsDownloadBytes(t *testing.T) {
 	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1, false))
 	a.tableSel = 0
 	tt := newGuiTester(t, a)
-	require.NoError(t, tt.Click("Pull…"))
+	require.NoError(t, tt.Click("拉取…"))
 
 	a.modal.busy = true
 	a.progress.set(PullStage{Phase: "download", Done: 512, Total: 1024})
 	tt.Frame()
 
-	assert.Contains(t, tt.Texts(), "downloading 512 B / 1.0 KiB")
+	assert.Contains(t, tt.Texts(), "下载中 512 B / 1.0 KiB")
 }
 
 func TestGuiViewBusyPullHidesTheConfirmButton(t *testing.T) {
 	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1, false))
 	a.tableSel = 0
 	tt := newGuiTester(t, a)
-	require.NoError(t, tt.Click("Pull…"))
+	require.NoError(t, tt.Click("拉取…"))
 
 	a.modal.busy = true
 	tt.Frame()
 
 	texts := tt.Texts()
-	assert.Contains(t, texts, "Working…")
-	assert.NotContains(t, texts, "Cancel", "a running pull must not offer a cancel that does nothing")
+	assert.Contains(t, texts, "处理中…")
+	assert.NotContains(t, texts, "取消", "a running pull must not offer a cancel that does nothing")
 }
 
 func TestGuiProgressSnapshotIsSafeWithoutAFrame(t *testing.T) {
@@ -364,7 +364,7 @@ func TestGuiViewStaysQuietWhenNothingIsLoading(t *testing.T) {
 	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1, false))
 	tt := newGuiTester(t, a)
 
-	assert.NotContains(t, tt.Texts(), "Loading…")
+	assert.NotContains(t, tt.Texts(), "加载中…")
 }
 
 func TestGuiOpenPushModalTargetsTheCurrentRepo(t *testing.T) {
@@ -396,25 +396,27 @@ func TestGuiPushLabelsOnEmptyInput(t *testing.T) {
 func TestGuiValidatePushNeedsASource(t *testing.T) {
 	m := guiModal{tag: "latest", srcPath: "  "}
 
-	assert.EqualError(t, m.validatePush(), "choose a file or directory to push")
+	assert.EqualError(t, m.validatePush(), "请选择要推送的文件或目录")
 }
 
 func TestGuiValidatePushRejectsAnEmptyTag(t *testing.T) {
 	m := guiModal{srcPath: "./data", tag: "   "}
 
-	assert.EqualError(t, m.validatePush(), "tag cannot be empty")
+	assert.EqualError(t, m.validatePush(), "tag 不能为空")
 }
 
 func TestGuiValidatePushRejectsSpacesInATag(t *testing.T) {
 	m := guiModal{srcPath: "./data", tag: "my tag"}
 
-	assert.EqualError(t, m.validatePush(), `tag "my tag" cannot contain spaces`)
+	assert.EqualError(t, m.validatePush(), `tag "my tag" 不能包含空格`)
 }
 
 func TestGuiValidatePushRejectsAMalformedLabel(t *testing.T) {
 	m := guiModal{srcPath: "./data", tag: "latest", labels: "broken"}
 
-	assert.EqualError(t, m.validatePush(), `invalid label format "broken", expected key=value`)
+	// The label parser is shared with the CLI and stays English; the GUI wraps
+	// it so the sentence the user reads first is Chinese.
+	assert.EqualError(t, m.validatePush(), `标签有误：invalid label format "broken", expected key=value`)
 }
 
 func TestGuiValidatePushRejectsAReservedLabel(t *testing.T) {
@@ -441,44 +443,44 @@ func TestGuiViewPushButtonIsAvailableWithNothingSelected(t *testing.T) {
 	// table selection the way Pull and Delete are.
 	tt := newGuiTester(t, guiTestApp())
 
-	assert.Contains(t, tt.Texts(), "Push…")
-	assert.Contains(t, tt.Texts(), "Select a tag to pull or delete.")
+	assert.Contains(t, tt.Texts(), "推送…")
+	assert.Contains(t, tt.Texts(), "请选择一个 tag 以拉取或删除。")
 }
 
 func TestGuiViewPushButtonOpensTheDialog(t *testing.T) {
 	a := guiTestApp()
 	tt := newGuiTester(t, a)
 
-	require.NoError(t, tt.Click("Push…"))
+	require.NoError(t, tt.Click("推送…"))
 	require.True(t, a.modalOpen)
 	assert.Equal(t, guiOpPush, a.modal.kind)
 
 	texts := tt.Texts()
-	assert.Contains(t, texts, "Source")
+	assert.Contains(t, texts, "源路径")
 	assert.Contains(t, texts, "Tag")
-	assert.Contains(t, texts, "Labels (one key=value per line)")
-	assert.Contains(t, texts, "Encrypt")
-	assert.NotContains(t, texts, "Passphrase", "the key field stays hidden until Encrypt is on")
+	assert.Contains(t, texts, "标签（每行一个 key=value）")
+	assert.Contains(t, texts, "加密")
+	assert.NotContains(t, texts, "密码", "the key field stays hidden until 加密 is on")
 }
 
 func TestGuiViewPushConfirmIsDisabledWithoutASource(t *testing.T) {
 	a := guiTestApp()
 	tt := newGuiTester(t, a)
-	require.NoError(t, tt.Click("Push…"))
+	require.NoError(t, tt.Click("推送…"))
 
 	// An incomplete form must not start a push that would fail in the
 	// registry round trip.
 	before := a.modal.busy
-	require.NoError(t, tt.Click("Push"))
+	require.NoError(t, tt.Click("推送"))
 	assert.Equal(t, before, a.modal.busy, "push ran with no source selected")
 }
 
 func TestGuiViewPushCancelClosesTheDialog(t *testing.T) {
 	a := guiTestApp()
 	tt := newGuiTester(t, a)
-	require.NoError(t, tt.Click("Push…"))
+	require.NoError(t, tt.Click("推送…"))
 
-	require.NoError(t, tt.Click("Cancel"))
+	require.NoError(t, tt.Click("取消"))
 	assert.False(t, a.modalOpen)
 }
 
@@ -486,11 +488,11 @@ func TestGuiViewDeleteDialogHasNoPushFields(t *testing.T) {
 	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1, false))
 	a.tableSel = 0
 	tt := newGuiTester(t, a)
-	require.NoError(t, tt.Click("Delete…"))
+	require.NoError(t, tt.Click("删除…"))
 
 	texts := tt.Texts()
-	assert.NotContains(t, texts, "Source")
-	assert.NotContains(t, texts, "Labels (one key=value per line)")
+	assert.NotContains(t, texts, "源路径")
+	assert.NotContains(t, texts, "标签（每行一个 key=value）")
 }
 
 // TestGuiViewPushDialogFitsTheSmallestWindow pins the layout floor. A
@@ -503,13 +505,13 @@ func TestGuiViewPushDialogFitsTheSmallestWindow(t *testing.T) {
 
 	a := guiTestApp()
 	tt := ui.NewTester(a.view, w, h)
-	require.NoError(t, tt.Click("Push…"))
+	require.NoError(t, tt.Click("推送…"))
 	tt.Frame()
 
 	for _, label := range []string{
-		"Source", "Tag", "Encrypt",
-		"Labels (one key=value per line)",
-		"Push", "Cancel",
+		"源路径", "Tag", "加密",
+		"标签（每行一个 key=value）",
+		"推送", "取消",
 	} {
 		r, ok := tt.Find(label)
 		require.True(t, ok, "%q is missing from the push dialog", label)
@@ -534,7 +536,7 @@ func TestGuiViewActionsStayClickableAfterTheTableGrows(t *testing.T) {
 	a.tableSel = 0
 	tt := ui.NewTester(a.view, w, h)
 
-	for _, label := range []string{"Push…", "Pull…", "Delete…"} {
+	for _, label := range []string{"推送…", "拉取…", "删除…"} {
 		r, ok := tt.Find(label)
 		require.True(t, ok, "%q is missing with 200 tags listed", label)
 		assert.LessOrEqual(t, r.Y+r.H, float32(h),

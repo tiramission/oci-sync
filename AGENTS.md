@@ -58,6 +58,21 @@ nix flake update                 # 更新 flake.lock 依赖
 
 **CLI/错误：** 所有命令描述、错误消息和日志必须使用英文（即使需求是中文）。
 
+**GUI 文案：** 桌面 GUI（`cmd/gui*.go`）里所有用户可见的字符串一律用**中文**——按钮、表头、
+占位符、空态/错误态提示、弹窗标题与字段标签、以及 `validatePush` 的校验错误。
+CLI 保持英文，因此这些文案就地写在 GUI 里，不抽成共享文案表：一个错误若要跨两者，
+就得选一种语言或者两种都带。
+
+两处例外是**故意保留英文**的，不要「顺手」翻译：
+- `cmd/utils.go` 的 `parseLabels` —— 它与 CLI 共用，错误信息归 CLI 所有。GUI 用
+  `fmt.Errorf("标签有误：%w", err)` 包一层，中文句子落在前面。为翻译而在 GUI 里重写
+  校验逻辑等于给同一条规则开出第二个事实来源。
+- 进度阶段 key（`"download"` / `"decrypt"` / `"unpack"` / `"check"`）来自 `runPull`，
+  翻译只发生在 `viewProgress` 的 switch 里，不要把这些 key 改成中文往下传。
+
+注意中文是全角字符，视觉宽度是英文的两倍：表头和固定宽度控件的 `Width` 要留够，
+新增中文文案后要重跑 `cmd` 里的布局回归测试。
+
 **安全：** 所有文件解包都使用 `filepath.Abs()` 防止路径穿越攻击（见 `internal/archive/archive.go`）。
 
 **大文件一律流式：** push/pull 不得把 artifact 整体读进内存。链路是 pack →（加密）→ staging 文件 → 上传，pull 反向，峰值内存是一个 1 MiB 分块（`crypto.ChunkSize`）。中间落地到文件不是偷懒：Registry 按内容 digest 寻址 blob，digest 必须先知道，而刚打好的 tar.gz 还不知道自己的 digest。改动这条链路时，内存版的 `archive.PackBytes`、`oci.Push`、`oci.Pull` 只能留给测试和非流式调用方。
