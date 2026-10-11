@@ -105,7 +105,9 @@ go list -m -f '{{.Dir}}' github.com/egoist/mygo
 **验证**：`CGO_ENABLED=0 go test ./...`，UI 行为用 `ui.NewTester` 断言。两个约束：
 
 - 一个 `ListState` 只能被一个 `Tester`（=一个窗口）渲染，第二个 Tester 用同一个会 panic。所以「渲染→点击→再断言」必须在**同一个** tester 里做。
-- 布局问题用 `tt.Find(text)` 拿 `Rect` 定位：`h=0` 或 `y` 超出窗口高度就说明元素被挤出视口、点不到。
+- 布局问题用 `tt.Find(text)` 拿 `Rect` 定位：`h=0` 或 `y + h` 超出窗口高度就说明元素被挤出视口、点不到。最小窗口 720×420 是布局下限，弹窗内每个字段都要在该尺寸下断言。
+
+**活动历史不要重复记录**：`runPush` / `runPull` / `runDelete` 内部已经调用 `recordActivity`，GUI 直接复用这些函数即可，不要在 GUI 侧再记一次。
 
 ## 📚 文档更新
 

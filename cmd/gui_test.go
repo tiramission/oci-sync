@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -364,4 +365,179 @@ func TestGuiViewStaysQuietWhenNothingIsLoading(t *testing.T) {
 	tt := newGuiTester(t, a)
 
 	assert.NotContains(t, tt.Texts(), "Loading…")
+}
+
+func TestGuiOpenPushModalTargetsTheCurrentRepo(t *testing.T) {
+	a := guiTestApp()
+	a.navSel = 1
+
+	a.openPushModal()
+
+	require.True(t, a.modalOpen)
+	assert.Equal(t, guiOpPush, a.modal.kind)
+	assert.Equal(t, "docs", a.modal.repo)
+	assert.Contains(t, a.modal.title, "registry.example.com/me/docs")
+	assert.Equal(t, "latest", a.modal.tag)
+	assert.False(t, a.modal.passphraseShown, "encrypting must be opt-in, not the default")
+}
+
+func TestGuiPushLabelsSkipBlankLines(t *testing.T) {
+	m := guiModal{labels: "a=1\n\n  b=2  \n\n"}
+
+	assert.Equal(t, []string{"a=1", "b=2"}, m.pushLabels())
+}
+
+func TestGuiPushLabelsOnEmptyInput(t *testing.T) {
+	m := guiModal{}
+
+	assert.Empty(t, m.pushLabels())
+}
+
+func TestGuiValidatePushNeedsASource(t *testing.T) {
+	m := guiModal{tag: "latest", srcPath: "  "}
+
+	assert.EqualError(t, m.validatePush(), "choose a file or directory to push")
+}
+
+func TestGuiValidatePushRejectsAnEmptyTag(t *testing.T) {
+	m := guiModal{srcPath: "./data", tag: "   "}
+
+	assert.EqualError(t, m.validatePush(), "tag cannot be empty")
+}
+
+func TestGuiValidatePushRejectsSpacesInATag(t *testing.T) {
+	m := guiModal{srcPath: "./data", tag: "my tag"}
+
+	assert.EqualError(t, m.validatePush(), `tag "my tag" cannot contain spaces`)
+}
+
+func TestGuiValidatePushRejectsAMalformedLabel(t *testing.T) {
+	m := guiModal{srcPath: "./data", tag: "latest", labels: "broken"}
+
+	assert.EqualError(t, m.validatePush(), `invalid label format "broken", expected key=value`)
+}
+
+func TestGuiValidatePushRejectsAReservedLabel(t *testing.T) {
+	m := guiModal{srcPath: "./data", tag: "latest", labels: "io.oci-sync.version=9"}
+
+	err := m.validatePush()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reserved")
+}
+
+func TestGuiValidatePushAcceptsACompleteForm(t *testing.T) {
+	m := guiModal{
+		srcPath:    "./data",
+		tag:        "v1.2.3",
+		labels:     "env=prod\nteam=infra",
+		passphrase: "secret",
+	}
+
+	assert.NoError(t, m.validatePush())
+}
+
+func TestGuiViewPushButtonIsAvailableWithNothingSelected(t *testing.T) {
+	// Push targets a repository, not a row, so it must not be gated on the
+	// table selection the way Pull and Delete are.
+	tt := newGuiTester(t, guiTestApp())
+
+	assert.Contains(t, tt.Texts(), "Push…")
+	assert.Contains(t, tt.Texts(), "Select a tag to pull or delete.")
+}
+
+func TestGuiViewPushButtonOpensTheDialog(t *testing.T) {
+	a := guiTestApp()
+	tt := newGuiTester(t, a)
+
+	require.NoError(t, tt.Click("Push…"))
+	require.True(t, a.modalOpen)
+	assert.Equal(t, guiOpPush, a.modal.kind)
+
+	texts := tt.Texts()
+	assert.Contains(t, texts, "Source")
+	assert.Contains(t, texts, "Tag")
+	assert.Contains(t, texts, "Labels (one key=value per line)")
+	assert.Contains(t, texts, "Encrypt")
+	assert.NotContains(t, texts, "Passphrase", "the key field stays hidden until Encrypt is on")
+}
+
+func TestGuiViewPushConfirmIsDisabledWithoutASource(t *testing.T) {
+	a := guiTestApp()
+	tt := newGuiTester(t, a)
+	require.NoError(t, tt.Click("Push…"))
+
+	// An incomplete form must not start a push that would fail in the
+	// registry round trip.
+	before := a.modal.busy
+	require.NoError(t, tt.Click("Push"))
+	assert.Equal(t, before, a.modal.busy, "push ran with no source selected")
+}
+
+func TestGuiViewPushCancelClosesTheDialog(t *testing.T) {
+	a := guiTestApp()
+	tt := newGuiTester(t, a)
+	require.NoError(t, tt.Click("Push…"))
+
+	require.NoError(t, tt.Click("Cancel"))
+	assert.False(t, a.modalOpen)
+}
+
+func TestGuiViewDeleteDialogHasNoPushFields(t *testing.T) {
+	a := guiWithArtifacts(guiTestApp(), guiArtifact("daily", 1, false))
+	a.tableSel = 0
+	tt := newGuiTester(t, a)
+	require.NoError(t, tt.Click("Delete…"))
+
+	texts := tt.Texts()
+	assert.NotContains(t, texts, "Source")
+	assert.NotContains(t, texts, "Labels (one key=value per line)")
+}
+
+// TestGuiViewPushDialogFitsTheSmallestWindow pins the layout floor. A
+// dialog that grows past the window puts its confirm button outside the
+// viewport, where Click silently does nothing — the failure mode that
+// Fill() caused earlier. Asserted on every field so a new one cannot be
+// added without checking it still fits.
+func TestGuiViewPushDialogFitsTheSmallestWindow(t *testing.T) {
+	const w, h = 720, 420
+
+	a := guiTestApp()
+	tt := ui.NewTester(a.view, w, h)
+	require.NoError(t, tt.Click("Push…"))
+	tt.Frame()
+
+	for _, label := range []string{
+		"Source", "Tag", "Encrypt",
+		"Labels (one key=value per line)",
+		"Push", "Cancel",
+	} {
+		r, ok := tt.Find(label)
+		require.True(t, ok, "%q is missing from the push dialog", label)
+		assert.Less(t, r.Y, float32(h),
+			"%q starts at y=%.1f, below the %d-high window", label, r.Y, h)
+		assert.GreaterOrEqual(t, r.Y+r.H, r.Y, "%q has a negative height", label)
+		assert.LessOrEqual(t, r.Y+r.H, float32(h),
+			"%q ends at y=%.1f, past the %d-high window", label, r.Y+r.H, h)
+	}
+}
+
+// TestGuiViewActionsStayClickableAfterTheTableGrows guards the same floor
+// for the main window: the action row must not be pushed off the bottom
+// however many tags are listed.
+func TestGuiViewActionsStayClickableAfterTheTableGrows(t *testing.T) {
+	const w, h = 720, 420
+
+	a := guiTestApp()
+	for i := range 200 {
+		a.artifacts = append(a.artifacts, guiArtifact(fmt.Sprintf("tag-%03d", i), 1024, false))
+	}
+	a.tableSel = 0
+	tt := ui.NewTester(a.view, w, h)
+
+	for _, label := range []string{"Push…", "Pull…", "Delete…"} {
+		r, ok := tt.Find(label)
+		require.True(t, ok, "%q is missing with 200 tags listed", label)
+		assert.LessOrEqual(t, r.Y+r.H, float32(h),
+			"%q ends at y=%.1f, past the %d-high window", label, r.Y+r.H, h)
+	}
 }

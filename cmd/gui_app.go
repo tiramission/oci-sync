@@ -2,15 +2,14 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"charm.land/log/v2"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/tiramission/oci-sync/internal/cache"
 	"github.com/tiramission/oci-sync/internal/config"
 	"github.com/tiramission/oci-sync/internal/oci"
 )
@@ -29,6 +28,7 @@ const (
 	guiOpNone guiOpKind = iota
 	guiOpPull
 	guiOpDelete
+	guiOpPush
 )
 
 // guiModal is the state of the overlay on top of the artifact table.
@@ -44,6 +44,14 @@ type guiModal struct {
 	// passphraseShown is false for a plain artifact, so the prompt asks
 	// for a key only when the artifact actually needs one.
 	passphraseShown bool
+
+	// srcPath and labels only apply to a push; the fields are shared with
+	// the pull dialog rather than split into a second struct, because the
+	// two dialogs are the same shape.
+	srcPath string
+	// labels is one "key=value" per line, which is also how it is passed
+	// to runPush, so what the user typed is what gets parsed.
+	labels string
 
 	busy bool
 	// err holds a failure from the last attempt. The modal stays open so
@@ -282,7 +290,41 @@ func (a *guiApp) startPull() {
 				return
 			}
 			a.closeModal()
-			a.record(cache.ActivityPull, ref, dest, nil)
+			a.refresh()
+		})
+	}()
+}
+
+// startPush runs a push in the background and reports through the modal.
+// Packing and uploading are both buffered whole, so there is no byte-level
+// progress to show — only that the operation is under way.
+func (a *guiApp) startPush() {
+	name := a.modal.repo
+	tag := a.modal.tag
+	src := a.modal.srcPath
+	pass := a.modal.passphrase
+	labels := a.modal.pushLabels()
+
+	a.progress.set(PullStage{Phase: "pack"})
+	win := a.win
+	go func() {
+		ref, err := buildShortcutRemoteRef(name, tag)
+		if err != nil {
+			a.failModal(err)
+			return
+		}
+		err = runPush(context.Background(), src, ref, pass, labels)
+		if win == nil {
+			return
+		}
+		win.Update(func() {
+			if err != nil {
+				a.finishModal(err)
+				return
+			}
+			a.closeModal()
+			// The new tag has to appear, and the repo may be one the list
+			// has not loaded yet, so refresh rather than patch the slice.
 			a.refresh()
 		})
 	}()
@@ -310,7 +352,6 @@ func (a *guiApp) startDelete() {
 				return
 			}
 			a.closeModal()
-			a.record(cache.ActivityDelete, ref, "", nil)
 			a.refresh()
 		})
 	}()
@@ -328,19 +369,6 @@ func (a *guiApp) failModal(err error) {
 func (a *guiApp) finishModal(err error) {
 	a.modal.busy = false
 	a.modal.err = err
-}
-
-// record writes an activity entry. A broken cache must not turn a successful
-// pull into a reported failure, so a write error only warns.
-func (a *guiApp) record(kind cache.ActivityType, ref, dest string, labels []string) {
-	recordActivity(cache.Activity{
-		Type:      kind,
-		Timestamp: time.Now(),
-		RemoteRef: ref,
-		LocalPath: dest,
-		Labels:    labels,
-		Success:   true,
-	})
 }
 
 func (a *guiApp) closeModal() {
@@ -508,6 +536,12 @@ func (a *guiApp) viewMain(c *ui.Context) {
 func (a *guiApp) viewActions(c *ui.Context) {
 	th := c.Theme()
 	ui.Row(c).Gap(8).Children(func() {
+		// Push targets the repository rather than a row, so it stays
+		// available when nothing is selected.
+		if ui.Button(c, "Push…").Clicked() {
+			a.openPushModal()
+		}
+
 		x, ok := a.selectedArtifact()
 		if !ok {
 			ui.Text(c, "Select a tag to pull or delete.").TextColor(th.TextMuted)
@@ -518,17 +552,25 @@ func (a *guiApp) viewActions(c *ui.Context) {
 		}
 		// ButtonBase has no danger look of its own, so the destructive
 		// action is a plain button painted with the theme's Danger.
-		if ui.ButtonBase(c).
-			Padding(6, 14).
-			Radius(th.Radius).
-			Background(th.Surface).
-			Border(1, th.Border).
-			Children(func() {
-				ui.Text(c, "Delete…").TextColor(th.Danger)
-			}).Clicked() {
+		if a.dangerButton(c, "Delete…").Clicked() {
 			a.openDeleteModal(x)
 		}
 	})
+}
+
+// dangerButton is a plain button painted with the theme's Danger color, for
+// actions that cannot be undone. MyGo has no DangerButton, and ButtonBase is
+// the only way to draw a button that is neither primary nor plain.
+func (a *guiApp) dangerButton(c *ui.Context, label string) ui.Element {
+	th := c.Theme()
+	return ui.ButtonBase(c).
+		Padding(6, 14).
+		Radius(th.Radius).
+		Background(th.Surface).
+		Border(1, th.Border).
+		Children(func() {
+			ui.Text(c, label).TextColor(th.Danger)
+		})
 }
 
 func (a *guiApp) openPullModal(x oci.ArtifactInfo) {
@@ -560,23 +602,75 @@ func (a *guiApp) openDeleteModal(x oci.ArtifactInfo) {
 	a.modalOpen = true
 }
 
-// browse asks the OS for a directory. The native dialog blocks, so it runs
-// off the main thread and the answer comes back through Window.Update.
-func (a *guiApp) browse(dest *string) {
+// openPushModal opens the push dialog. It targets the current shortcut's
+// repository, so it stays available even before any artifact is listed.
+func (a *guiApp) openPushModal() {
+	a.modal = guiModal{
+		kind:    guiOpPush,
+		repo:    a.currentShortcut().Name,
+		title:   "Push to " + a.currentShortcut().Repo,
+		confirm: "Push",
+		// The tag has to be typed: there is nothing on the remote side to
+		// suggest one, and overwriting a tag by accident is worse than
+		// typing it out.
+		tag: "latest",
+	}
+	a.progress.set(PullStage{})
+	a.modalOpen = true
+}
+
+// pushLabels splits the label lines into the "key=value" form runPush takes.
+// A blank line is skipped so a trailing newline is harmless.
+func (m *guiModal) pushLabels() []string {
+	var out []string
+	for _, line := range strings.Split(m.labels, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// validatePush reports what the dialog still needs before a push can run.
+// Checking here keeps the failure next to the field that caused it, rather
+// than surfacing later as an opaque error from the registry round trip.
+func (m *guiModal) validatePush() error {
+	if strings.TrimSpace(m.srcPath) == "" {
+		return errors.New("choose a file or directory to push")
+	}
+	if strings.TrimSpace(m.tag) == "" {
+		return errors.New("tag cannot be empty")
+	}
+	if strings.ContainsAny(m.tag, " \t") {
+		return fmt.Errorf("tag %q cannot contain spaces", m.tag)
+	}
+	// Labels go through the same parser the CLI uses, so a malformed one is
+	// rejected here instead of being silently dropped there.
+	if _, err := parseLabels(m.pushLabels(), true); err != nil {
+		return err
+	}
+	return nil
+}
+
+// browse asks the OS for a path. The native dialog blocks, so it runs off
+// the main thread and the answer comes back through Window.Update. dirs
+// selects directories only; otherwise files and folders are both offered,
+// which is what a push source can be.
+func (a *guiApp) browse(dest *string, dirs bool) {
 	win := a.win
 	go func() {
-		dirs, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		picked, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 			Parent:      win,
-			Title:       "Choose a destination directory",
-			Directory:   true,
+			Title:       "Choose a path",
+			Directory:   dirs,
 			DefaultPath: *dest,
 		})
 		if win == nil {
 			return
 		}
 		win.Update(func() {
-			if err == nil && len(dirs) > 0 {
-				*dest = dirs[0]
+			if err == nil && len(picked) > 0 {
+				*dest = picked[0]
 			}
 		})
 	}()
@@ -603,13 +697,41 @@ func (a *guiApp) viewModal(c *ui.Context) {
 					ui.Row(c).Gap(8).Children(func() {
 						ui.TextInput(c, &m.destPath).Grow(1).SingleLine()
 						if ui.Button(c, "Browse…").Clicked() {
-							a.browse(&m.destPath)
+							a.browse(&m.destPath, true)
 						}
 					})
 					if m.passphraseShown {
 						ui.Text(c, "Passphrase").TextColor(th.TextMuted)
 						ui.TextInput(c, &m.passphrase).Password().SingleLine()
 					}
+				case guiOpPush:
+					ui.Text(c, "Source").TextColor(th.TextMuted)
+					ui.Row(c).Gap(8).Children(func() {
+						ui.TextInput(c, &m.srcPath).Grow(1).SingleLine()
+						if ui.Button(c, "Browse…").Clicked() {
+							a.browse(&m.srcPath, false)
+						}
+					})
+
+					ui.Text(c, "Tag").TextColor(th.TextMuted)
+					ui.TextInput(c, &m.tag).SingleLine()
+
+					// Pushing unencrypted is the common case, so the key field
+					// sits behind a toggle and stays empty until asked for.
+					encrypt := m.passphraseShown
+					if ui.Toggle(c, &encrypt, "Encrypt").Changed() {
+						m.passphraseShown = encrypt
+						if !encrypt {
+							m.passphrase = ""
+						}
+					}
+					if m.passphraseShown {
+						ui.Text(c, "Passphrase").TextColor(th.TextMuted)
+						ui.TextInput(c, &m.passphrase).Password().SingleLine()
+					}
+
+					ui.Text(c, "Labels (one key=value per line)").TextColor(th.TextMuted)
+					ui.TextArea(c, &m.labels).Lines(2, 4).FillWidth()
 				case guiOpDelete:
 					ui.Text(c, "This removes the tag from the remote registry and cannot be undone.")
 				}
@@ -630,12 +752,22 @@ func (a *guiApp) viewModal(c *ui.Context) {
 						a.closeModal()
 					}
 					label := m.confirm
-					if ui.PrimaryButton(c, label).Clicked() {
+					// A push with no source or a malformed label is rejected
+					// before it starts, so the button stays live and the error
+					// sits next to the field that caused it.
+					ok := ui.PrimaryButton(c, label)
+					if m.kind == guiOpPush && m.validatePush() != nil {
+						ok = ok.Disabled(true)
+					}
+					if ok.Clicked() {
 						m.busy = true
 						m.err = nil
-						if m.kind == guiOpPull {
+						switch m.kind {
+						case guiOpPull:
 							a.startPull()
-						} else {
+						case guiOpPush:
+							a.startPush()
+						default:
 							a.startDelete()
 						}
 					}
