@@ -73,6 +73,12 @@ CLI 保持英文，因此这些文案就地写在 GUI 里，不抽成共享文�
 注意中文是全角字符，视觉宽度是英文的两倍：表头和固定宽度控件的 `Width` 要留够，
 新增中文文案后要重跑 `cmd` 里的布局回归测试。
 
+**GUI 文字对比度**：不要直接拿 `th.TextMuted` / `th.Warning` 当正文色。MyGo 调色板里有几组配对
+低于 WCAG AA 正文阈值（4.5:1）——`TextMuted`/`Surface` 浅色 4.40、`TextMuted`/`Selection`
+浅色 3.37 深色 3.88、`Warning`/`Background` 浅色 3.19。用 `cmd/gui_contrast.go` 里的
+`readableSecondary` / `readableOnSelection` / `readableWarning`，它们只在不达标时才动手，
+且只改到刚好达标。新增次要文字时同理，并跑 `gui_contrast_test.go`。
+
 **安全：** 所有文件解包都使用 `filepath.Abs()` 防止路径穿越攻击（见 `internal/archive/archive.go`）。
 
 **大文件一律流式：** push/pull 不得把 artifact 整体读进内存。链路是 pack →（加密）→ staging 文件 → 上传，pull 反向，峰值内存是一个 1 MiB 分块（`crypto.ChunkSize`）。中间落地到文件不是偷懒：Registry 按内容 digest 寻址 blob，digest 必须先知道，而刚打好的 tar.gz 还不知道自己的 digest。改动这条链路时，内存版的 `archive.PackBytes`、`oci.Push`、`oci.Pull` 只能留给测试和非流式调用方。

@@ -150,11 +150,13 @@ oci-sync/
 │   ├── tui_keys.go                # tui 按键绑定
 │   ├── gui.go                     # gui 子命令：cobra 定义与窗口创建
 │   ├── gui_app.go                 # gui 应用：状态、后台任务、视图函数
+│   ├── gui_contrast.go            # gui 文本可读性：对比度校正辅助函数
 │   ├── utils.go                   # 共用工具（formatBytes / label 解析 / 活动记录）
 │   ├── utils_test.go              # label 校验与解析单元测试
 │   ├── shortcut_test.go           # shortcut 引用构造单元测试
 │   ├── tui_test.go                # tui 状态机与渲染单元测试
-│   └── gui_test.go                # gui 状态逻辑与 headless 渲染测试
+│   ├── gui_test.go                # gui 状态逻辑与 headless 渲染测试
+│   └── gui_contrast_test.go       # 对比度阈值与「不过度校正」测试
 └── internal/
     ├── config/
     │   ├── config.go              # 配置文件支持
@@ -630,6 +632,25 @@ oci-sync gui
 
 **全角宽度**：中文是全角字符，视觉宽度约为英文的两倍。表头与固定宽度控件的 `Width` 要留够，
 最小窗口（720×420）下的布局回归测试是这一点的守门人。
+
+**文本可读性**（`cmd/gui_contrast.go`）：MyGo 调色板对控件够用，但把次要文字放到 Surface 背景
+或选中行上时，有几组配对低于 WCAG AA 正文阈值（4.5:1）。以下是实测值，非估计：
+
+| 前景 / 背景 | light | dark |
+|---|---|---|
+| `TextMuted` / `Background` | 4.83 | 6.91 |
+| `TextMuted` / `Surface` | **4.40** | 5.81 |
+| `TextMuted` / `Selection` | **3.37** | **3.88** |
+| `Warning` / `Background` | **3.19** | 8.25 |
+
+因此三个辅助函数：`readableSecondary`（Surface 上的次要文字）、
+`readableOnSelection`（选中行上的仓库路径）、`readableWarning`（表格里的「是」）。
+`ensureContrast` 在 `Color.Mix` 的混合系数上二分，找到**刚好**达标的最小改动——
+既不无脑加深（那会把整个界面压成同一个色调），也不闭式反解 WCAG 公式
+（那等于在这里重写一份 Mix，还可能和渲染器算得不一样）。
+表单字段标签是「指令」而非装饰，直接用 `th.Text`。
+
+`cmd/gui_contrast_test.go` 锁住这些数字：MyGo 换配色时会红。
 
 **状态与生命周期约束**（MyGo 特有，写错会静默出错）：
 

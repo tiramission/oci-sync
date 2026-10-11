@@ -401,13 +401,17 @@ func (a *guiApp) viewToolbar(c *ui.Context) {
 		ui.Text(c, "oci-sync").Bold().FontSize(15)
 
 		ui.Row(c).Grow(1).Gap(8).Justify(ui.End).Children(func() {
-			ui.Text(c, "过滤").TextColor(th.TextMuted)
+			// The toolbar sits on Surface, not Background, and TextMuted on
+			// Surface is the one pair the light palette puts below the WCAG
+			// AA threshold for body text (4.40:1). Secondary labels here
+			// have to be readable, so they get readableSecondary instead.
+			ui.Text(c, "过滤").TextColor(readableSecondary(th))
 			ui.TextInput(c, &a.filter).
 				Placeholder("tag 包含…").
 				SingleLine().
 				Width(220)
 			if a.loading {
-				ui.Text(c, "加载中…").TextColor(th.TextMuted)
+				ui.Text(c, "加载中…").TextColor(readableSecondary(th))
 			}
 			if ui.Button(c, "刷新").Clicked() {
 				a.refresh()
@@ -421,7 +425,13 @@ func (a *guiApp) viewSidebar(c *ui.Context) {
 	// The list has to Grow and the column FillHeight, or the list takes its
 	// natural height and pushes the rest of the window out of view.
 	ui.Column(c).FillHeight().Width(220).Gap(6).Padding(10).Children(func() {
-		ui.Text(c, "快捷方式").TextColor(th.TextMuted).FontSize(11)
+		// A section heading in caps-sized grey is the weakest text in the
+		// window, so it gets the readable secondary colour and a size that
+		// still reads as a heading rather than a caption.
+		ui.Text(c, "快捷方式").
+			TextColor(readableSecondary(th)).
+			FontSize(12).
+			Bold()
 
 		list := ui.List(c, &a.navList, len(a.shortcuts))
 		list.ItemKey(func(row int) any {
@@ -441,7 +451,7 @@ func (a *guiApp) viewSidebar(c *ui.Context) {
 			if r.Selected() {
 				bg = th.Selection
 			}
-			ui.Column(c).FillWidth().Gap(0).Padding(4, 6).Background(bg).Children(func() {
+			ui.Column(c).FillWidth().Gap(2).Padding(5, 6).Background(bg).Children(func() {
 				// Bold takes no argument, so a conditional style has to
 				// branch on the whole call: an Element is registered with
 				// the build pass by the call that creates it.
@@ -450,9 +460,17 @@ func (a *guiApp) viewSidebar(c *ui.Context) {
 				} else {
 					ui.Text(c, s.Name).MaxLines(1).Ellipsis("…")
 				}
+				// The repo line is the one that identifies where this
+				// shortcut points, so it stays legible on both row
+				// backgrounds — muted grey over the selection tint is the
+				// worst pair in the window at 3.37:1.
+				repoColor := readableSecondary(th)
+				if r.Selected() {
+					repoColor = readableOnSelection(th)
+				}
 				ui.Text(c, s.Repo).
-					TextColor(th.TextMuted).
-					FontSize(11).
+					TextColor(repoColor).
+					FontSize(12).
 					SingleLine().
 					Ellipsis("…")
 			})
@@ -491,7 +509,7 @@ func (a *guiApp) viewMain(c *ui.Context) {
 			head = a.currentShortcut().Repo
 		}
 		rows := a.guiVisible()
-		ui.Text(c, fmt.Sprintf("%s — 共 %d 个 tag", head, len(rows))).TextColor(th.TextMuted)
+		ui.Text(c, fmt.Sprintf("%s — 共 %d 个 tag", head, len(rows))).TextColor(readableSecondary(th))
 
 		// Exactly one of these takes the room the header and the action row
 		// leave. Without Grow/FillHeight on the table it would claim its
@@ -502,11 +520,11 @@ func (a *guiApp) viewMain(c *ui.Context) {
 			ui.Text(c, "无法列出 tag："+a.listErr.Error()).TextColor(th.Danger)
 			ui.Spacer(c)
 		case a.loading && len(rows) == 0:
-			ui.Text(c, "加载中…").TextColor(th.TextMuted)
+			ui.Text(c, "加载中…").TextColor(readableSecondary(th))
 			ui.Spacer(c)
 		case len(rows) == 0:
 			ui.Text(c, "暂无 artifact。可用 'oci-sync push' 推送一个，或清除过滤条件。").
-				TextColor(th.TextMuted)
+				TextColor(readableSecondary(th))
 			ui.Spacer(c)
 		default:
 			// Chinese headers are two cells wide per character, so each
@@ -525,10 +543,14 @@ func (a *guiApp) viewMain(c *ui.Context) {
 				case 1:
 					ui.Text(c, formatBytes(x.Size))
 				case 2:
+					// "是" marks an encrypted artifact, which is the one
+					// cell worth noticing in a scan, so it takes the
+					// readable warning colour; "否" is the absence of
+					// news and stays quiet.
 					if x.Encrypted {
-						ui.Text(c, "是").TextColor(th.Warning)
+						ui.Text(c, "是").TextColor(readableWarning(th)).Bold()
 					} else {
-						ui.Text(c, "否").TextColor(th.TextMuted)
+						ui.Text(c, "否").TextColor(readableSecondary(th))
 					}
 				case 3:
 					ui.Text(c, x.Version)
@@ -551,7 +573,7 @@ func (a *guiApp) viewActions(c *ui.Context) {
 
 		x, ok := a.selectedArtifact()
 		if !ok {
-			ui.Text(c, "请选择一个 tag 以拉取或删除。").TextColor(th.TextMuted)
+			ui.Text(c, "请选择一个 tag 以拉取或删除。").TextColor(readableSecondary(th))
 			return
 		}
 		if ui.PrimaryButton(c, "拉取…").Clicked() {
@@ -718,7 +740,7 @@ func (a *guiApp) viewModal(c *ui.Context) {
 
 				switch m.kind {
 				case guiOpPull:
-					ui.Text(c, "目标路径").TextColor(th.TextMuted)
+					ui.Text(c, "目标路径").TextColor(th.Text)
 					ui.Row(c).Gap(8).Children(func() {
 						ui.TextInput(c, &m.destPath).Grow(1).SingleLine()
 						if ui.Button(c, "浏览…").Clicked() {
@@ -726,7 +748,7 @@ func (a *guiApp) viewModal(c *ui.Context) {
 						}
 					})
 					if m.passphraseShown {
-						ui.Text(c, "密码").TextColor(th.TextMuted)
+						ui.Text(c, "密码").TextColor(th.Text)
 						ui.TextInput(c, &m.passphrase).Password().SingleLine()
 					}
 				case guiOpPush:
@@ -736,7 +758,7 @@ func (a *guiApp) viewModal(c *ui.Context) {
 					// The hint rides on the label rather than taking a row of
 					// its own: at 720x420 the dialog has no vertical room to
 					// spare, and the regression test enforces that.
-					ui.Text(c, "源路径（文件或目录）").TextColor(th.TextMuted)
+					ui.Text(c, "源路径（文件或目录）").TextColor(th.Text)
 					ui.Row(c).Gap(8).Children(func() {
 						ui.TextInput(c, &m.srcPath).Grow(1).SingleLine()
 						if ui.Button(c, "选择文件…").Clicked() {
@@ -747,7 +769,7 @@ func (a *guiApp) viewModal(c *ui.Context) {
 						}
 					})
 
-					ui.Text(c, "Tag").TextColor(th.TextMuted)
+					ui.Text(c, "Tag").TextColor(th.Text)
 					ui.TextInput(c, &m.tag).SingleLine()
 
 					// Pushing unencrypted is the common case, so the key field
@@ -760,11 +782,11 @@ func (a *guiApp) viewModal(c *ui.Context) {
 						}
 					}
 					if m.passphraseShown {
-						ui.Text(c, "密码").TextColor(th.TextMuted)
+						ui.Text(c, "密码").TextColor(th.Text)
 						ui.TextInput(c, &m.passphrase).Password().SingleLine()
 					}
 
-					ui.Text(c, "标签（每行一个 key=value）").TextColor(th.TextMuted)
+					ui.Text(c, "标签（每行一个 key=value）").TextColor(th.Text)
 					ui.TextArea(c, &m.labels).Lines(2, 4).FillWidth()
 				case guiOpDelete:
 					ui.Text(c, "这会从远程 registry 删除该 tag，且无法撤销。")
@@ -779,7 +801,7 @@ func (a *guiApp) viewModal(c *ui.Context) {
 
 				ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 					if m.busy {
-						ui.Text(c, "处理中…").TextColor(th.TextMuted)
+						ui.Text(c, "处理中…").TextColor(readableSecondary(th))
 						return
 					}
 					if ui.Button(c, "取消").Clicked() {
@@ -838,7 +860,7 @@ func (a *guiApp) viewProgress(c *ui.Context) {
 	if label == "" {
 		return
 	}
-	ui.Text(c, label).TextColor(th.TextMuted)
+	ui.Text(c, label).TextColor(readableSecondary(th))
 	if phase == "download" && total > 0 {
 		ui.Progress(c, float64(done)/float64(total)).FillWidth()
 	}
