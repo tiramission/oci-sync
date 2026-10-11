@@ -239,6 +239,112 @@ func TestRenderedLinesFitEverySupportedSize(t *testing.T) {
 	}
 }
 
+// The rendered frame has to be exactly as tall as the terminal.
+//
+// Width alone is not enough to catch a layout that overflows: a frame two
+// rows too tall still has every line within the width limit, so the width
+// checks pass while the terminal scrolls — the header scrolls off the top
+// and the footer is cut in half. The pane heights, the overlay heights and
+// the header and footer rows all have to be counted against m.height here.
+func TestRenderedRowsMatchTheWindowHeight(t *testing.T) {
+	bases := []func() model{newTestModel, func() model { return withArtifacts(newTestModel()) }}
+	sizes := [][2]int{{48, 12}, {60, 24}, {76, 24}, {80, 24}, {100, 30}, {120, 40}, {220, 60}}
+	for _, base := range bases {
+		for _, size := range sizes {
+			m := press(t, base(), tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+			views := map[string]string{
+				"browse":    m.View(),
+				"detail":    press(t, m, enterMsg).View(),
+				"confirm":   press(t, m, keys("d")).View(),
+				"pullpath":  press(t, m, keys("p")).View(),
+				"result":    m.showResult(opPull, nil).View(),
+				"help":      press(t, m, keys("?")).View(),
+				"filtering": press(t, m, keys("/"), keys("v1")).View(),
+				"pushform":  press(t, m, keys("P")).View(),
+				"editing":   press(t, m, keys("e")).View(),
+				"sidebar":   press(t, m, tea.KeyMsg{Type: tea.KeyTab}).View(),
+			}
+			for name, view := range views {
+				rows := strings.Count(view, "\n") + 1
+				if rows != size[1] {
+					t.Errorf("size %dx%d state %q rendered %d rows, want %d",
+						size[0], size[1], name, rows, size[1])
+				}
+			}
+		}
+	}
+}
+
+// An overlay taller than the window is not centred on it, it runs off the
+// bottom — and takes the hint line that says which key closes it. The
+// details overlay is the tallest one, so it is the one that shows it.
+func TestOverlayFitsAShortWindow(t *testing.T) {
+	m := press(t, withArtifacts(newTestModel()),
+		tea.WindowSizeMsg{Width: 60, Height: 12}, enterMsg)
+
+	view := m.View()
+	if rows := strings.Count(view, "\n") + 1; rows != 12 {
+		t.Errorf("details overlay rendered %d rows in a 12 row window", rows)
+	}
+}
+
+// An overlay taller than the window is not centred on it, it runs off the
+// bottom — and takes the hint line that says which key closes it. The
+// details overlay is the tallest one, so it is the one that shows it, and
+// it has to survive at the minimum window size.
+func TestOverlayKeepsItsHintAtEveryWindowHeight(t *testing.T) {
+	for _, h := range []int{12, 14, 16, 20, 24, 30, 40} {
+		// The narrow width matters: it is what makes a field wrap onto a
+		// second line, and a wrapped field is what pushes the hint off
+		// the bottom. At 80 columns the widest dialog already fits and
+		// the test would pass whatever the overlay did.
+		for _, seq := range [][]string{
+			{"enter"}, {"d"}, {"p"}, {"P"}, {"e"}, {"/"},
+		} {
+			m := press(t, withArtifacts(newTestModel()),
+				tea.WindowSizeMsg{Width: 48, Height: h})
+			var msgs []tea.Msg
+			for _, k := range seq {
+				msgs = append(msgs, keys(k))
+			}
+			state := press(t, m, msgs...)
+			view := state.View()
+			if rows := strings.Count(view, "\n") + 1; rows != h {
+				t.Errorf("height %d keys %v: %d rows", h, seq, rows)
+			}
+			// The hint is the only row that tells the user how to leave.
+			// Losing it is worse than losing a field.
+			if state.state != stateBrowse && !strings.Contains(stripANSI(view), ": close") &&
+				!strings.Contains(stripANSI(view), ": cancel") &&
+				!strings.Contains(stripANSI(view), ": submit") &&
+				!strings.Contains(stripANSI(view), ": push") &&
+				!strings.Contains(stripANSI(view), ": apply") &&
+				!strings.Contains(stripANSI(view), ": confirm") {
+				t.Errorf("height %d keys %v: overlay lost its hint line\n%s",
+					h, seq, view)
+			}
+		}
+	}
+}
+
+// stripANSI removes escape sequences, so a test can look for text that a
+// style wrapped.
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b {
+			for i < len(s) && s[i] != 'm' {
+				i++
+			}
+			i++
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
 func TestTooSmallFloorMessage(t *testing.T) {
 	m := press(t, newTestModel(), tea.WindowSizeMsg{Width: 40, Height: 10})
 	if view := m.View(); !strings.Contains(view, "terminal too small") {

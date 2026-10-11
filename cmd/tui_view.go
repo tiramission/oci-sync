@@ -93,6 +93,18 @@ func paneStyle(active bool, w, h int) lipgloss.Style {
 		Height(h)
 }
 
+// paneHeight is the content height a pane gets.
+//
+// The panes are joined under a header row and above a footer row, and each
+// pane adds a top and a bottom border of its own — four rows the window
+// never has. Height() counts content only, so the borders come out of this
+// number too. Getting it wrong pushes the footer off the bottom of the
+// terminal, which shows up as a screen that scrolls instead of as an
+// obviously broken one.
+func (m model) paneHeight() int {
+	return max(m.height-4, 1)
+}
+
 func (m model) viewSidebar(g geometry) string {
 	active := !m.focusPanes && m.state == stateBrowse
 	title := "Shortcuts"
@@ -125,7 +137,7 @@ func (m model) viewSidebar(g geometry) string {
 	if len(m.shortcuts) == 0 {
 		lines = append(lines, stDim.Render("No shortcuts."))
 	}
-	return paneStyle(active, g.sbW, m.height-2).Render(strings.Join(lines, "\n"))
+	return paneStyle(active, g.sbW, m.paneHeight()).Render(strings.Join(lines, "\n"))
 }
 
 func (m model) viewArtifacts(g geometry) string {
@@ -178,7 +190,7 @@ func (m model) viewArtifacts(g geometry) string {
 			lines = append(lines, line)
 		}
 	}
-	return paneStyle(active, g.mainW, m.height-2).Render(strings.Join(lines, "\n"))
+	return paneStyle(active, g.mainW, m.paneHeight()).Render(strings.Join(lines, "\n"))
 }
 
 func (m model) viewFooter() string {
@@ -442,10 +454,16 @@ func sortedLabelKeys(m map[string]string) []string {
 	return keys
 }
 
+// The label column is padded to 11 and the value starts at 12, so the
+// longest key ("repository", exactly 10 cells) still leaves one space
+// before its value. Padding to the key's own width instead runs them
+// together on exactly that key — and the one that runs together is the
+// first field in the list.
 func (m model) detailBody(a oci.ArtifactInfo, w int) string {
-	label := func(s string) string { return stDim.Render(padRight(s, 10)) }
+	const labelW = 11
+	label := func(s string) string { return stDim.Render(padRight(s, labelW)) }
 	field := func(k, v string) string {
-		return label(k) + truncate(v, max(w-12, 8))
+		return label(k) + truncate(v, max(w-labelW-1, 8))
 	}
 	lines := []string{
 		field("repository", a.Repo),
@@ -479,13 +497,64 @@ func (m model) helpBody() string {
 	})
 }
 
+// overlay draws a centred dialog.
+//
+// The height is capped to the window before it is drawn, because
+// lipgloss.Place only centres what it is given: an overlay taller than the
+// window is not centred on it, it simply runs off the bottom, taking the
+// hint line — the one that says which key closes it — with it. Clamping
+// the width alone would leave a short window able to break the same way.
 func (m model) overlay(title, body, hints string, accent lipgloss.Color, w int) string {
 	w = min(w, m.width-6)
-	content := title + "\n\n" + body + "\n\n" + stDim.Render(hints)
+	// Three different numbers, and using one for all three is how the hint
+	// line gets cut. Measured behaviour of Border + Padding(1,2) +
+	// MaxHeight: MaxHeight is applied to the padded text, so a body of b
+	// rows plus padding is capped at MaxHeight, and the borders add two
+	// more on top.
+	//
+	//   bodyRows  the most the body may be trimmed to
+	//   maxHeight the cap passed to lipgloss, on padded text
+	//   framed    bodyRows + padding + borders, which must fit the window
+	// lipgloss's MaxHeight caps the whole framed dialog, borders included,
+	// and Padding(1) is applied before the cap, so the room the text
+	// actually gets is the window less two borders and two padding rows:
+	//
+	//   maxHeight  the cap to hand lipgloss — the whole frame
+	//   bodyRows   what title + blanks + body + hint must fit inside,
+	//              which is the same window less the four rows of frame
+	//
+	// Trimming against maxHeight instead leaves the text two rows over and
+	// MaxHeight cuts the bottom, which is exactly where the hint is.
+	const frameRows = 4
+	maxHeight := max(m.height, 1)
+	bodyRows := max(maxHeight-frameRows, 1)
+
+	// The hint line is the one row that must never go: it is what says
+	// which key closes the dialog, and a short window that cut it would
+	// leave the user with no visible way out. So the body gives up rows
+	// first, from the end — a missing field is a smaller problem than a
+	// dialog that cannot be dismissed.
+	hint := stDim.Render(hints)
+	fit := func(b string) string { return title + "\n\n" + b + "\n\n" + hint }
+	for {
+		candidate := fit(body)
+		if lipgloss.Height(candidate) <= bodyRows {
+			break
+		}
+		lines := strings.Split(body, "\n")
+		if len(lines) <= 1 {
+			body = ""
+			break
+		}
+		body = strings.Join(lines[:len(lines)-1], "\n")
+	}
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(accent).
 		Width(w).
+		// MaxHeight, not Height: Height would also pad a short dialog out
+		// to the full window, leaving a tall empty box around two fields.
+		MaxHeight(maxHeight).
 		Padding(1, 2).
-		Render(content)
+		Render(fit(body))
 }
