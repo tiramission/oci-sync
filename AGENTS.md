@@ -135,8 +135,11 @@ go list -m -f '{{.Dir}}' github.com/egoist/mygo
 
 `mygo vet` 除了跑 `go vet`，还用类型信息检查 **MyGo build 值的生命周期**——
 把 `ui.Element` / `ui.Context` / `ui.ListRow` 等存进结构体字段、包级变量，或传进 goroutine，都会报错。
-这些正是 GUI 里最难靠肉眼发现的一类 bug（下一帧就失效），所以是硬门禁。它不是 `go tool`，
-本机也未必预装，需要时 `GOBIN="$HOME/go/bin" go install github.com/egoist/mygo/cmd/mygo@v0.4.2`。
+这些正是 GUI 里最难靠肉眼发现的一类 bug（下一帧就失效），所以是硬门禁。
+
+CLI 由 `go.mod` 的 `tool` 指令管理，`go tool mygo vet .` 即可，版本与 `github.com/egoist/mygo`
+一起锁定，**不要**再 `go install` 到 `GOBIN`——那样装出来的是另一份可能与 `go.mod` 不一致的二进制。
+升级用 `go get -tool github.com/egoist/mygo/cmd/mygo@vX.Y.Z`（会同时更新库依赖与工具）。
 
 两个约束：
 

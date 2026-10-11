@@ -733,6 +733,13 @@ Focus / Surface / Border）。Danger、Success 与各 pressed 态保持 MyGo 原
 **验证**：`cmd/gui_test.go`（36 个用例）用 `ui.NewTester` 做 headless 断言，覆盖过滤、选中、
 空态/错误态/加载态、三个弹窗的开关、推送表单校验、进度文案、布局下限与多帧稳定性。约束：
 
+- 除单测外还有一道静态门禁：`go tool mygo vet .`。它在 `go vet` 之外用类型信息检查
+  **MyGo build 值的生命周期**——把 `ui.Element` / `ui.Context` / `ui.ListRow` 存进结构体字段、
+  包级变量，或传进 goroutine，都会报错。这类 bug 下一帧就失效，肉眼和运行时都看不出来，
+  正是 GUI 最需要静态检查的部分。CLI 由 `go.mod` 的 `tool` 指令管理，与 `mygo` 库同版本锁定，
+  不要另行 `go install`（那是另一份可能与 `go.mod` 不一致的二进制）；
+  升级用 `go get -tool github.com/egoist/mygo/cmd/mygo@vX.Y.Z`。
+
 - 一个 `ListState` 只能被一个 Tester 渲染，第二个 Tester 复用它会 panic，因此「渲染→点击→再断言」
   必须在同一个 tester 内完成。
 - 布局断言用 `tt.Find(text)` 的 `Rect`：`h=0` 或 `y + h` 超出窗口高度即视为失败。最小窗口

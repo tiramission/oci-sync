@@ -62,3 +62,5 @@ require (
 	golang.org/x/term v0.41.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 )
+
+tool github.com/egoist/mygo/cmd/mygo
