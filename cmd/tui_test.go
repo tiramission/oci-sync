@@ -227,7 +227,11 @@ func TestRenderedLinesFitEverySupportedSize(t *testing.T) {
 				"filtering": press(t, m, keys("/"), keys("v1")).View(),
 				"pushform":  press(t, m, keys("P")).View(),
 				"editing":   press(t, m, keys("e")).View(),
+				"sorting":   press(t, m, keys("s")).View(),
 			}
+			loading := m
+			loading.op = opFetch
+			views["loading"] = loading.View()
 			for name, view := range views {
 				if line := firstOverWideLine(view, size[0]); line != "" {
 					t.Fatalf("size %dx%d state %q has a %d-cell line: %q", size[0], size[1], name, cellWidth(line), line)
@@ -260,8 +264,12 @@ func TestRenderedRowsMatchTheWindowHeight(t *testing.T) {
 				"filtering": press(t, m, keys("/"), keys("v1")).View(),
 				"pushform":  press(t, m, keys("P")).View(),
 				"editing":   press(t, m, keys("e")).View(),
+				"sorting":   press(t, m, keys("s")).View(),
 				"sidebar":   press(t, m, tea.KeyMsg{Type: tea.KeyTab}).View(),
 			}
+			loading := m
+			loading.op = opFetch
+			views["loading"] = loading.View()
 			for name, view := range views {
 				rows := strings.Count(view, "\n") + 1
 				if rows != size[1] {
@@ -641,6 +649,160 @@ func TestEmptyRepositoryAndEmptyFilterAreDistinct(t *testing.T) {
 	}
 	if strings.Contains(view2, "no artifacts yet") {
 		t.Fatalf("a filtered-empty table must not claim the repository is empty:\n%s", view2)
+	}
+}
+
+// The design's header opens with a highlighted brand chip: the app name
+// padded with two spaces either side, so it reads as a block rather than
+// as loose text.
+func TestHeaderShowsThePaddedBrandChip(t *testing.T) {
+	m := press(t, withArtifacts(newTestModel()), tea.WindowSizeMsg{Width: 100, Height: 30})
+	first, _, _ := strings.Cut(m.View(), "\n")
+	if !strings.Contains(stripANSI(first), "  oci-sync  ") {
+		t.Fatalf("header must render the app name as a padded chip, got %q", stripANSI(first))
+	}
+}
+
+// Both panes carry a status foot: the sidebar names the loaded repository
+// with its tag count ("repo · 14"), the table says how much of it the
+// window can hold ("7 of 14 shown").
+func TestPanesShowTheirStatusFoots(t *testing.T) {
+	m := withArtifacts(newTestModel())
+	m.repo = "r.io/x" // short, so the foot fits without truncation
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "r.io/x · 3") {
+		t.Fatalf("sidebar foot must show the loaded repo and its count:\n%s", view)
+	}
+	if !strings.Contains(view, "3 of 3 shown") {
+		t.Fatalf("table foot must show rows of total:\n%s", view)
+	}
+}
+
+// While the fetch runs the table shows skeleton rows under the real column
+// header, not a lone spinner line: the frame keeps its shape, so nothing
+// jumps when the data lands. The spinner and the esc hint live in the
+// header.
+func TestLoadingRendersSkeletonRows(t *testing.T) {
+	m := withArtifacts(newTestModel())
+	m.op = opFetch
+	view := stripANSI(m.View())
+	if strings.Contains(view, "Loading tags") {
+		t.Fatalf("the loading line moved to the header; the pane should be a skeleton:\n%s", view)
+	}
+	if !strings.Contains(view, "loading…") {
+		t.Fatalf("the header must still say the fetch is running:\n%s", view)
+	}
+	rows := 0
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "░") {
+			rows++
+		}
+	}
+	if rows != 6 {
+		t.Fatalf("expected 6 skeleton rows while loading, got %d:\n%s", rows, view)
+	}
+}
+
+// s cycles registry order → size → tag, and the selection follows its tag
+// to the row's new position instead of being left on whatever landed at
+// the old index. The header names the active order.
+func TestSortKeyCyclesAndKeepsTheSelection(t *testing.T) {
+	m := withArtifacts(newTestModel())
+	m = press(t, m, keys("s"))
+
+	if m.sortBy != sortSize {
+		t.Fatalf("first press should sort by size, got %d", m.sortBy)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "SIZE ▾") {
+		t.Fatalf("the sorted column must be marked in the header:\n%s", view)
+	}
+	// size desc: LATEST (2048), v1 (1024), fix-linux (512).
+	if m.visible[0].Tag != "LATEST" {
+		t.Fatalf("size sort should be descending, got %q first", m.visible[0].Tag)
+	}
+	if sel, ok := m.currentArtifact(); !ok || sel.Tag != "v1" {
+		t.Fatalf("the selection must follow its tag after sorting, got %+v", sel)
+	}
+
+	m = press(t, m, keys("s"))
+	if m.sortBy != sortTag {
+		t.Fatalf("second press should sort by tag, got %d", m.sortBy)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "TAG ▴") {
+		t.Fatalf("the tag column must be marked in the header:\n%s", view)
+	}
+	// tag asc, case-folded: fix-linux, LATEST, v1.
+	if sel, _ := m.currentArtifact(); sel.Tag != "v1" {
+		t.Fatalf("the selection must still be on v1, got %q", sel.Tag)
+	}
+
+	m = press(t, m, keys("s"))
+	if m.sortBy != sortRegistry {
+		t.Fatalf("third press should return to registry order, got %d", m.sortBy)
+	}
+	if sel, _ := m.currentArtifact(); sel.Tag != "v1" || m.artifactIdx != 0 {
+		t.Fatalf("registry order starts with v1, got idx %d tag %q", m.artifactIdx, sel.Tag)
+	}
+}
+
+// The footer is the design's line: one row of "key: desc" entries split by
+// middle dots — not bubbles/help's default " • " separator.
+func TestFooterMatchesTheDesignFormat(t *testing.T) {
+	m := withArtifacts(newTestModel())
+	m.width = 200 // room for the whole line
+	line := stripANSI(m.viewFooter())
+	if strings.Contains(line, "•") {
+		t.Fatalf("footer must use the design's middle-dot separator:\n%s", line)
+	}
+	for _, want := range []string{
+		"↑/k ↓/j: navigate", "enter: open", "tab: pane",
+		"P: push", "p: pull", "d: delete", "?: help", "q: quit", " · ",
+	} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("footer is missing %q:\n%s", want, line)
+		}
+	}
+}
+
+// The filter input is drawn in the header while it is being typed: the
+// table and the counter move per keystroke, and an input you cannot see
+// turns each keystroke into a guess.
+func TestFilterQueryIsVisibleInTheHeader(t *testing.T) {
+	m := withArtifacts(newTestModel())
+	m = press(t, m, keys("/"), keys("fix"))
+	first, _, _ := strings.Cut(m.View(), "\n")
+	if !strings.Contains(stripANSI(first), "fix") {
+		t.Fatalf("the typed filter must appear in the header, got %q", stripANSI(first))
+	}
+}
+
+// The confirm dialog names the full repository:tag. It sits above an
+// irreversible warning, where an abbreviation that could belong to any of
+// several repositories is the wrong thing to skim.
+func TestDeleteConfirmShowsFullRepositoryRef(t *testing.T) {
+	m := press(t, withArtifacts(newTestModel()), keys("d"))
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "registry.example.com/alpha:v1") {
+		t.Fatalf("confirmation must show the full repository:tag:\n%s", view)
+	}
+}
+
+// Pane content is laid into lipgloss frames, which word-wrap whatever they
+// measure wider than the frame — and count ambiguous glyphs double on a CJK
+// terminal. Truncation and padding for pane lines must therefore fit the
+// wrap budget, or the frame grows past the window.
+func TestPaneTruncationStaysWithinTheWrapLimit(t *testing.T) {
+	s := "registry.example.com/some/very/long/path/for/truncation"
+	for _, w := range []int{8, 12, 20, 40} {
+		for name, got := range map[string]int{
+			"truncatePane":       wrapWidth(truncatePane(s, w)),
+			"truncateMiddlePane": wrapWidth(truncateMiddlePane(s, w)),
+			"padWrap":            wrapWidth(padWrap(truncatePane(s, w), w)),
+		} {
+			if got > w {
+				t.Errorf("%s(%d) measures %d cells to the renderer, limit %d", name, w, got, w)
+			}
+		}
 	}
 }
 

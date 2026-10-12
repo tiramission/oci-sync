@@ -111,7 +111,7 @@ CLI 参数传入 → 读取 ~/.cache/oci-sync/activity.json
 ```
 CLI 启动 → 全屏分栏交互界面（焦点模型：Shortcuts / Artifacts 二选一；<76 列折叠为单栏）
         → Enter 加载所选 shortcut 仓库 → [oci.List]（Cmd 协程异步执行，Esc 可取消，过期结果按 seq 丢弃）
-        → P 推送（表单）/ p 拉取 / d 删除 / e 编辑标签
+        → P 推送（表单）/ p 拉取 / d 删除 / e 编辑标签 / s 切换排序
         → 拉取实时显示下载进度条（字节/百分比/子块精度）与阶段（check/download/decrypt/unpack），结束后以结果弹窗展示并可重试
 ```
 
@@ -574,17 +574,20 @@ oci-sync tui
 ```
 
 **界面分区**：
-- **Header（顶部一行）**：应用名、当前/待定仓库路径，右对齐显示 tag 计数或 `n/m`（过滤时）以及加载 spinner。
-- **Shortcuts（左侧边栏）**：配置的 shortcuts，`▸` 标记当前项，反白表示焦点所在行。终端宽度 `<76` 时与其它面板折叠为单栏。
-- **Artifacts（右侧主栏）**：当前 shortcut 的 tag 表格（`TAG`、`SIZE`、`ENC`、`VER`）。数字右对齐，超宽截断并加省略号，宽度不足时自动隐藏 `VER` 列。
+- **Header（顶部一行）**：应用名以反白 chip 呈现（`  oci-sync  `，设计稿的高亮块）、当前/待定仓库路径（超宽中间省略），右对齐显示 tag 计数或 `n/m`（过滤时）以及加载 spinner。`/` 过滤进行中，右上角显示正在输入的查询（`/v▌`）——输入框不可见时每个按键都是猜测。
+- **Shortcuts（左侧边栏）**：配置的 shortcuts，`▸` 标记当前项，反白表示焦点所在行，未选中行右侧附 repo 路径；底部页脚显示已加载仓库与计数（`ghcr.io/acme/configs · 14`）。聚焦栏标题用强调色。终端宽度 `<76` 时与其它面板折叠为单栏。
+- **Artifacts（右侧主栏）**：标题为 `Artifacts · <repo>`；tag 表格（`TAG`、`SIZE`、`ENC`、`VER`），数字右对齐，超宽截断并加省略号，宽度不足时自动隐藏 `VER` 列。`ENC` 列是扫视中唯一值得被一眼捕捉的信息：加密显示加粗警示色的 `enc`，未加密为次要色的 `·`（文字+颜色双通道）。底部页脚 `7 of 14 shown` 说明窗口能放下多少行。聚焦栏标题用强调色。
+- **加载态（骨架行）**：`oci.List` 进行中，表格在真实列头下渲染 6 行 `░` 骨架行而非一行 spinner——刷新时高度不塌陷再撑开；spinner 与 `esc cancels` 提示在 Header。
 - **焦点用边框粗细表达，不用颜色**：当前栏画双线边框（`┃`），非当前栏画单线圆角边框（`│`）。终端没有半像素边框，1.5px 只能近似成「双线 vs 单线」；而粗细是余光能捕捉的信号，两个相近的紫色之间的换色不是。颜色仍随焦点变化，但只作强化。弹窗与表单接管键盘时**两侧都不画焦点**——背后的界面不能宣称一个用户此刻并不持有的焦点。
-- **Footer（底部提示栏）**：按当前焦点/模态上下文自动生成快捷键提示（来自 `bubbles/help`）。
+- **Footer（底部提示栏）**：按当前焦点/模态上下文自动生成快捷键提示（来自 `bubbles/help`），格式即设计稿的一行 `↑/k ↓/j: navigate · enter: open · tab: pane · P: push · p: pull · d: delete · ?: help · q: quit`：`key: desc` 条目、`·` 分隔、整体次要色。`e` / `/` / `r` / `esc` 等次级键位收在 `?` 键位表里——80 列下两者只能取其一，而静默丢掉一半的 footer 教不会任何人少的是哪个键。
 - **详情视图（enter）**：宽表格的兜底手段——在 artifact 上按 enter 弹出居中详情，展示 Full Name、Digest、Version、Size、Encryption、Labels（键排序）。
-- **模态弹窗（居中单框）**：路径输入、密码提示、删除确认（默认 No）、执行结果、`?` 帮助，均以单层圆角框呈现。
+- **模态弹窗（居中单框）**：路径输入、密码提示、删除确认（默认 No，正文显示完整 `repo:tag` 而非 shortcut 缩写——那行字上面就是不可撤销的警告）、执行结果、`?` 帮助，均以单层圆角框呈现。
 - **三态区分**：产物表为空有三种成因，文案必须分开——未加载仓库（提示选仓库）、仓库为空（提示按 `P` 推送）、被过滤筛空（提示清过滤）。把后两者混为一谈会给出方向相反的下一步。
 - **footer 宽度**：footer 是唯一不受 `truncate` 约束的部分，但宽度只在这里判一次。`bubbles/help` 的 `ShortHelpView` 会自行截断到 `help.Width` 并以省略号收尾，而它内部的宽度是 locale 相关的——所以走 `untruncatingHelp`（`Width = 0`）取不截断的渲染，由 `fitBindings` 用 `cellWidth` 从尾部丢绑定，**丢过东西才补 `? more` 指针**（宽度够放下全部键位时指针指向的键位表就在屏幕上，是多余的）。`clampHelp` 只作兜底。少了那个标记，footer 会在用户以为「就这些键」时静默少掉一半。
 
 - **终端宽度必须钉死，不能继承 locale**：东亚歧义宽度字符（`↑` `↓` `•` `→` `…`）在西文终端算 1 列、CJK 终端算 2 列，`lipgloss.Width` 与 `runewidth.DefaultCondition` 都跟着 locale 走。同一句 footer 在 help 里量 90 列、在别处量 100 列，结果是撑破窗口（终端滚动）或被截成 `? …`（键位提示全丢），且两种机器表现不同——本地全绿、用户失败就是这么来的。因此：`cmd/tui.go` 的 `cellCond` 固定按 1 列；`cellWidth` 自剥 ANSI 可直接量已染色字符串；`place`/`joinVertical` 自己实现而非用 `lipgloss.Place`/`JoinVertical`，因为组合器也必须用同一把尺；`help.Width` 对 footer 而言一律置 0。改布局后必须 `RUNEWIDTH_EASTASIAN=0` 与 `=1` 各跑一遍测试。
+
+**面板内容还有第二把尺：`wrapCond`**。面板的框是 lipgloss 画的，而 lipgloss 会对任何它量得比框宽的行做**自动折行**——它的量法同样跟着 locale（CJK 下 `…` `·` `↑` `↓` 算 2 列）。于是「按 `cellWidth` 正好铺满一行」的面板内容，在 CJK 终端上被量成超宽、折到第二行，整帧比窗口高出一两行——**只有 CJK 机器会滚动**。因此面板内的截断/补位用 `truncatePane` / `truncateMiddlePane` / `padWrap`，按 `wrapCond`（钉死的 CJK 最坏情况，两 locale 通吃）计费；表格最后一列吸收整行的歧义字符（`·`、`…`）留下的欠账，前面各列保持精确列宽，列对齐不受影响；表头排序标记选用单格宽的 `▴`/`▾` 而非歧义的 `↑`/`↓`（同 `▸`），表头因此永远精确。`truncate`/`padRight` 仍是 `cellWidth` 尺，服务 frame 之外的 header、footer、弹窗与组合器——**两把尺各管各的领地，不要混用**。
 
 **响应式下限**：`terminal too small — need at least 48×12`，低于此不渲染花屏。
 
@@ -609,6 +612,7 @@ oci-sync tui
 - `p`：拉取所选 artifact（弹窗输入路径，加密再输密码）
 - `d`：删除所选 artifact（默认 No 的确认弹窗）
 - `e`：编辑所选 artifact 的标签，`key=value` 设置、裸 key 移除
+- `s`：切换排序——registry 顺序 → 大小（降序）→ 标签（不区分大小写升序）→ 回到 registry 顺序；排序列在表头以 `▾`/`▴` 标记，选中行跟随其 tag 移动。设计稿的键位表写作「时间/大小/标签」，但 registry 不返回任何时间戳（tag 无 created 字段、空 config blob 也没有创建时间），时间排序无从谈起，周期覆盖数据实际有的两种
 - `r`：重新加载当前 tag 列表
 - `/`：按 tag 过滤（smart-case：小写不区分大小写，含大写则区分）
 - `Esc`：加载/推送/拉取/删除/改标签进行中取消操作，否则关闭弹窗或退回 Shortcuts 栏

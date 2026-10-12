@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -172,7 +174,11 @@ var (
 	colErr    = lipgloss.Color("1") // failure
 	colMuted  = lipgloss.Color("8") // chrome, metadata
 
-	stApp        = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
+	// stBrand is the header's app-name chip: a reversed block, as in the
+	// design ("  oci-sync  " on a highlight background). Reverse rather
+	// than a fixed colour pair, so the chip inverts whatever palette the
+	// terminal already runs instead of fighting it.
+	stBrand      = lipgloss.NewStyle().Reverse(true)
 	stAccent     = lipgloss.NewStyle().Foreground(colAccent)
 	stDim        = lipgloss.NewStyle().Foreground(colMuted)
 	stHeading    = lipgloss.NewStyle().Bold(true)
@@ -181,6 +187,19 @@ var (
 	stOK         = lipgloss.NewStyle().Bold(true).Foreground(colOK)
 	stErr        = lipgloss.NewStyle().Bold(true).Foreground(colErr)
 	stWarn       = lipgloss.NewStyle().Bold(true).Foreground(colWarn)
+)
+
+// sortMode orders the artifact table. The design's key table offers
+// 时间 / 大小 / 标签, but the registry gives us no timestamps — tags carry
+// no created field and the empty config blob has no creation time — so the
+// cycle covers what the data actually has: registry order, then size, then
+// tag name.
+type sortMode int
+
+const (
+	sortRegistry sortMode = iota
+	sortSize
+	sortTag
 )
 
 // cellCond measures terminal cells on this app's terms.
@@ -214,14 +233,46 @@ func cellWidth(s string) int {
 	return cellCond.StringWidth(ansi.Strip(s))
 }
 
-// runeCells is cellWidth for a single rune.
-func runeCells(r rune) int {
-	return cellCond.RuneWidth(r)
+// wrapCond is the pane renderer's ruler, pinned.
+//
+// cellCond pins ambiguous glyphs at one cell — this app's layout ruler.
+// But the pane frames are drawn by lipgloss, which word-wraps any line it
+// measures wider than the frame, and its measurement follows the locale:
+// on a CJK terminal "…", "·" and "↑" count two cells each. A line built to
+// the pane width exactly then measures over and gets wrapped onto a second
+// row — the frame grows past the window and the terminal scrolls, on CJK
+// machines only.
+//
+// So pane content is fitted against this condition instead: East Asian
+// ambiguous counted double, always, regardless of environment. It is the
+// worst case of both locales, so a line that fits here is never wrapped —
+// and, being pinned, it renders the same on every machine.
+var wrapCond = func() *runewidth.Condition {
+	c := runewidth.NewCondition()
+	c.EastAsianWidth = true
+	c.CreateLUT()
+	return c
+}()
+
+// wrapWidth measures s the way lipgloss's wrap check will, under wrapCond.
+func wrapWidth(s string) int {
+	return wrapCond.StringWidth(ansi.Strip(s))
+}
+
+// amb is the cells the renderer may add to s on top of cellWidth — the
+// ambiguous glyphs it counts double. Zero for plain ASCII, which is why
+// every helper below is a no-op on it.
+func amb(s string) int {
+	return wrapWidth(s) - cellWidth(s)
 }
 
 // truncate cuts s to w display cells, appending an ellipsis. Width is
-// measured in terminal cells so CJK and wide glyphs stay aligned. It must be
-// applied to plain strings, before any styling.
+// measured in terminal cells so CJK and wide glyphs stay aligned. It must
+// be applied to plain strings, before any styling.
+//
+// This is the cellWidth ruler: it serves everything outside the pane
+// frames — header, footer, overlays, the compositor. Pane content uses
+// truncatePane, which pays for the renderer's CJK count instead.
 func truncate(s string, w int) string {
 	if w <= 0 {
 		return ""
@@ -237,7 +288,7 @@ func truncate(s string, w int) string {
 	var b strings.Builder
 	used := 0
 	for _, r := range s {
-		rw := runeCells(r)
+		rw := cellCond.RuneWidth(r)
 		if used+rw > budget {
 			break
 		}
@@ -247,12 +298,141 @@ func truncate(s string, w int) string {
 	return b.String() + tail
 }
 
+// truncatePane is truncate's counterpart for lines that will be laid into
+// a pane frame: it fits against wrapWidth, so the result does not measure
+// over the pane's limit under the renderer's CJK count either — or the line
+// gets word-wrapped onto a second row and the frame grows past the window.
+// The ellipsis is paid out of the same budget (two cells under that
+// count), so the output is deterministic: one pinned ruler, same result in
+// every locale.
+func truncatePane(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if wrapWidth(s) <= w {
+		return s
+	}
+	tail := "…"
+	budget := w - wrapWidth(tail)
+	if budget < 0 {
+		return ""
+	}
+	var b strings.Builder
+	used := 0
+	for _, r := range s {
+		rw := wrapCond.RuneWidth(r)
+		if used+rw > budget {
+			break
+		}
+		b.WriteRune(r)
+		used += rw
+	}
+	return b.String() + tail
+}
+
+// padWrap pads s with spaces until it measures w cells to the pane
+// renderer's wrap check (wrapWidth).
+//
+// padRight fills to cellWidth, which is right for lines that never meet
+// lipgloss's frame — but a pane line with an ambiguous glyph in it, padded
+// to its full width in cells, measures over that width to the renderer and
+// gets wrapped onto a second row. Pad to the wrap budget instead: spaces
+// are one cell under both counts, so the trailing pad simply gives up the
+// cells the glyphs will claim. Column alignment is untouched — padWrap
+// only ever changes trailing space.
+func padWrap(s string, w int) string {
+	return s + strings.Repeat(" ", max(w-wrapWidth(s), 0))
+}
+
 func padRight(s string, w int) string {
 	return s + strings.Repeat(" ", max(w-cellWidth(s), 0))
 }
 
 func padLeft(s string, w int) string {
 	return strings.Repeat(" ", max(w-cellWidth(s), 0)) + s
+}
+
+// truncateMiddle cuts a path-like string to w cells while keeping both ends
+// readable. A repository path names itself at the two ends — registry in
+// front, repository at the back — and truncate drops the back, so a long
+// path degraded to "registry.example…" stopped telling you which repository
+// it was. The ellipsis takes the middle instead: one cell for it, the rest
+// split between the head and the tail. Cell-width ruler — for pane content
+// see truncateMiddlePane.
+func truncateMiddle(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if cellWidth(s) <= w {
+		return s
+	}
+	headCells := (w - 1) / 2
+	tailCells := w - 1 - headCells
+
+	var head []rune
+	used := 0
+	for _, r := range s {
+		rw := cellCond.RuneWidth(r)
+		if used+rw > headCells {
+			break
+		}
+		head = append(head, r)
+		used += rw
+	}
+
+	runes := []rune(s)
+	var tail []rune
+	used = 0
+	for i := len(runes) - 1; i >= 0; i-- {
+		rw := cellCond.RuneWidth(runes[i])
+		if used+rw > tailCells {
+			break
+		}
+		tail = append(tail, runes[i])
+		used += rw
+	}
+	slices.Reverse(tail)
+	return string(head) + "…" + string(tail)
+}
+
+// truncateMiddlePane is truncateMiddle fitted to a pane frame: same
+// head-and-tail shape, but every width — head budget, tail budget, the
+// ellipsis itself — is paid in wrap cells, so the line never measures over
+// the pane's limit under the renderer's CJK count.
+func truncateMiddlePane(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if wrapWidth(s) <= w {
+		return s
+	}
+	headBudget := (w - wrapWidth("…")) / 2
+	tailBudget := w - wrapWidth("…") - headBudget
+
+	var head []rune
+	used := 0
+	for _, r := range s {
+		rw := wrapCond.RuneWidth(r)
+		if used+rw > headBudget {
+			break
+		}
+		head = append(head, r)
+		used += rw
+	}
+
+	runes := []rune(s)
+	var tail []rune
+	used = 0
+	for i := len(runes) - 1; i >= 0; i-- {
+		rw := wrapCond.RuneWidth(runes[i])
+		if used+rw > tailBudget {
+			break
+		}
+		tail = append(tail, runes[i])
+		used += rw
+	}
+	slices.Reverse(tail)
+	return string(head) + "…" + string(tail)
 }
 
 type model struct {
@@ -280,6 +460,7 @@ type model struct {
 	fetchSeq    int
 	fetchCancel context.CancelFunc
 	filterText  string
+	sortBy      sortMode
 
 	op        opKind
 	opStart   time.Time
@@ -333,12 +514,21 @@ func newTuiModel(ctx context.Context, shortcuts []config.ShortcutInfo) model {
 	ti := textinput.New()
 	ti.Prompt = ""
 	ti.Width = modalWidth - 10
+	// The footer is one dim line, as in the design: "↑/k ↓/j: navigate ·
+	// enter: open · …". bubbles/help defaults to a " • " separator and a
+	// two-tone grey of its own; both are overridden here so the footer
+	// uses this app's muted token and the design's middle-dot separator.
+	h := help.New()
+	h.ShortSeparator = " · "
+	h.Styles.ShortKey = stDim
+	h.Styles.ShortDesc = stDim
+	h.Styles.ShortSeparator = stDim
 	return model{
 		baseCtx:   ctx,
 		shortcuts: shortcuts,
 		input:     ti,
 		spinner:   spinner.New(spinner.WithSpinner(spinner.Dot)),
-		help:      help.New(),
+		help:      h,
 		keys:      newKeyMap(),
 	}
 }
@@ -399,10 +589,12 @@ func (m model) geo() geometry {
 		g.sbW = min(max(w/4, 16), 28)
 		g.mainW = w - g.sbW - 4
 	}
-	// Each pane spends 2 rows on borders; the table also uses one column
-	// header row and both panes one title row.
-	g.listRows = max(h-5, 1)
-	g.tagRows = max(h-6, 1)
+	// Each pane spends 2 rows on borders; beyond that the sidebar's
+	// content is title + rows + status foot, and the table's is title +
+	// header + rows + foot. The footers live inside the pane, so they
+	// come out of the row budget the same way the titles do.
+	g.listRows = max(h-6, 1)
+	g.tagRows = max(h-7, 1)
 	g.showVer = g.mainW >= 62
 	g.verW = 8
 	if g.mainW >= 72 {
@@ -617,13 +809,7 @@ func (m *model) cancelFetch() {
 
 func (m *model) setFilter(q string) {
 	m.filterText = q
-	m.visible = make([]oci.ArtifactInfo, 0, len(m.artifacts))
-	for _, a := range m.artifacts {
-		if matchFilter(a.Tag, q) {
-			m.visible = append(m.visible, a)
-		}
-	}
-	m.artifactIdx = min(m.artifactIdx, max(len(m.visible)-1, 0))
+	m.applyFilter()
 	m.scrollOff = 0
 }
 
@@ -702,13 +888,49 @@ func (m model) onFetchResult(msg fetchArtifactsMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// applyFilter rebuilds the visible rows from the artifact list: filter
+// first, then sort, then put the selection back on the same tag. Both the
+// filter keystroke and the sort key reach the rows through here, so the
+// cursor follows the selected tag instead of staying at an index that now
+// names a different row.
 func (m *model) applyFilter() {
-	q := m.filterText
+	keep := ""
+	if m.artifactIdx >= 0 && m.artifactIdx < len(m.visible) {
+		keep = m.visible[m.artifactIdx].Tag
+	}
 	m.visible = make([]oci.ArtifactInfo, 0, len(m.artifacts))
 	for _, a := range m.artifacts {
-		if matchFilter(a.Tag, q) {
+		if matchFilter(a.Tag, m.filterText) {
 			m.visible = append(m.visible, a)
 		}
+	}
+	m.sortVisible()
+
+	found := keep == ""
+	for i, a := range m.visible {
+		if !found && a.Tag == keep {
+			m.artifactIdx, found = i, true
+		}
+	}
+	if !found {
+		// The selection was filtered away; clamp rather than jump.
+		m.artifactIdx = min(m.artifactIdx, max(len(m.visible)-1, 0))
+	}
+}
+
+// sortVisible orders the filtered rows by the active sort mode. Registry
+// order is the unfiltered list as List returned it, so it costs nothing:
+// the rows arrive in that order and the switch falls through.
+func (m *model) sortVisible() {
+	switch m.sortBy {
+	case sortSize:
+		sort.SliceStable(m.visible, func(i, j int) bool {
+			return m.visible[i].Size > m.visible[j].Size
+		})
+	case sortTag:
+		sort.SliceStable(m.visible, func(i, j int) bool {
+			return strings.ToLower(m.visible[i].Tag) < strings.ToLower(m.visible[j].Tag)
+		})
 	}
 }
 
@@ -1018,6 +1240,13 @@ func (m model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.input.Focus()
 	case key.Matches(msg, k.Refresh):
 		return m, tea.Batch(m.startFetch(), m.spinner.Tick)
+	case key.Matches(msg, k.Sort):
+		// Cycle registry order → size → tag and back, rebuilding the rows
+		// through applyFilter so the selection follows its tag to the
+		// row's new position instead of being left on whatever landed at
+		// the old index.
+		m.sortBy = (m.sortBy + 1) % (sortTag + 1)
+		m.applyFilter()
 	case key.Matches(msg, k.Pull):
 		if a, ok := m.currentArtifact(); ok {
 			m.input.SetValue("./" + a.Tag)
