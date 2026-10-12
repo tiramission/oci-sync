@@ -16,5 +16,8 @@ temps/
 # Editor/IDE
 .antigravitycli/
 
+# Agent tooling (local skills/config live in the agent's global directory)
+.opencode/
+
 # Agent workspace (local memory and session data)
 .workbuddy/
