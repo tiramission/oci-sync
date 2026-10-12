@@ -106,17 +106,37 @@ func (m model) viewHeader() string {
 		right = m.spinner.View() + " " + stDim.Render("pulling…  esc cancels")
 	case m.op == opDelete:
 		right = m.spinner.View() + " " + stDim.Render("deleting…  esc cancels")
-	case m.filterText != "" && len(m.artifacts) > 0:
-		right = stDim.Render(fmt.Sprintf("%d/%d tags", len(m.visible), len(m.artifacts)))
+	case m.state == stateFilter:
+		// The query has to be on screen while it is being typed. The table
+		// and the counter already move per keystroke; an input you cannot
+		// see turns each keystroke into a guess, and the design asks for a
+		// focus indicator that is always visible.
+		right = stAccent.Render("/") +
+			truncate(m.input.Value(), max(m.width/3, 8)) + stCursor.Render(" ")
+		if count := stDim.Render(m.tagCount()); count != "" {
+			right += "  " + count
+		}
 	case len(m.artifacts) > 0:
-		right = stDim.Render(fmt.Sprintf("%d tags", len(m.artifacts)))
+		right = stDim.Render(m.tagCount())
 	}
 
-	brand := stApp.Render("oci-sync")
+	brand := stBrand.Render("  oci-sync  ")
 	budget := m.width - cellWidth(brand) - cellWidth(right) - 3
-	left := brand + "  " + stDim.Render(truncate(crumb, budget))
+	left := brand + "  " + stDim.Render(truncateMiddle(crumb, budget))
 	pad := max(m.width-cellWidth(left)-cellWidth(right), 0)
 	return left + strings.Repeat(" ", pad) + right
+}
+
+// tagCount is the header's right-hand counter: how many tags match, of how
+// many there are, once a repository is loaded.
+func (m model) tagCount() string {
+	switch {
+	case m.filterText != "" && len(m.artifacts) > 0:
+		return fmt.Sprintf("%d/%d tags", len(m.visible), len(m.artifacts))
+	case len(m.artifacts) > 0:
+		return fmt.Sprintf("%d tags", len(m.artifacts))
+	}
+	return ""
 }
 
 func (m model) viewPanes() string {
@@ -165,29 +185,37 @@ func (m model) paneHeight() int {
 
 func (m model) viewSidebar(g geometry) string {
 	active := !m.focusPanes && m.state == stateBrowse
-	title := "Shortcuts"
-	var lines []string
+	paneH := m.paneHeight()
+	// The focused pane's title carries the accent, as in the design; the
+	// border's weight is what reads at a glance, the colour reinforces it.
+	titleStyle := stDim
 	if active {
-		lines = append(lines, stHeading.Render(truncate(title, g.sbW)))
-	} else {
-		lines = append(lines, stDim.Render(truncate(title, g.sbW)))
+		titleStyle = stAccent
 	}
+	lines := []string{titleStyle.Render(truncatePane("Shortcuts", g.sbW))}
 	for i := m.sbScroll; i < len(m.shortcuts) && i < m.sbScroll+g.listRows; i++ {
 		s := m.shortcuts[i]
 		gutter := "  "
 		if i == m.shortcutIdx {
 			gutter = "▸ "
 		}
-		name := truncate(s.Name, g.sbW-2)
+		name := truncatePane(s.Name, g.sbW-2)
 		plain := gutter + name
-		repoW := g.sbW - cellWidth(plain) - 2
+		// The repo tail gets what the name left over — measured in wrap
+		// cells, so a name that grew an ellipsis does not push the repo
+		// tail past the frame's right edge.
+		repoW := g.sbW - wrapWidth(plain) - 2
+		repo := ""
+		if i != m.shortcutIdx && repoW > 8 {
+			repo = truncateMiddlePane(s.Repo, repoW)
+		}
 		switch {
 		case i == m.shortcutIdx && active:
-			lines = append(lines, stCursor.Render(padRight(plain, g.sbW)))
+			lines = append(lines, stCursor.Render(padWrap(plain, g.sbW)))
 		case i == m.shortcutIdx:
-			lines = append(lines, stCursorBlur.Render(padRight(plain, g.sbW)))
-		case repoW > 8:
-			lines = append(lines, padRight(plain, g.sbW-repoW)+stDim.Render(truncate(s.Repo, repoW)))
+			lines = append(lines, stCursorBlur.Render(padWrap(plain, g.sbW)))
+		case repo != "":
+			lines = append(lines, padWrap(plain, g.sbW-wrapWidth(repo))+stDim.Render(repo))
 		default:
 			lines = append(lines, plain)
 		}
@@ -195,21 +223,61 @@ func (m model) viewSidebar(g geometry) string {
 	if len(m.shortcuts) == 0 {
 		lines = append(lines, stDim.Render("No shortcuts."))
 	}
-	return paneStyle(active, g.sbW, m.paneHeight()).Render(strings.Join(lines, "\n"))
+	// Pad, then append: the foot belongs on the pane's last row, and
+	// lipgloss's Height pads after the content it was handed — putting the
+	// foot in last is what pins it to the bottom border.
+	for len(lines) < paneH-1 {
+		lines = append(lines, "")
+	}
+	lines = append(lines, m.sidebarFoot(g))
+	return paneStyle(active, g.sbW, paneH).Render(strings.Join(lines, "\n"))
+}
+
+// sidebarFoot is the sidebar's status line: the loaded repository with its
+// tag count — the design's "ghcr.io/acme/configs · 14" — or, before
+// anything is loaded, the repository the selection would load. The count is
+// the point: it sits where the eye rests after a switch, so knowing how
+// many artifacts a repository holds never costs a trip to the table.
+func (m model) sidebarFoot(g geometry) string {
+	var s string
+	switch {
+	case m.repo != "":
+		s = fmt.Sprintf("%s · %d", m.repo, len(m.artifacts))
+	case len(m.shortcuts) > 0:
+		s = m.selectedShortcut().Repo
+	default:
+		return ""
+	}
+	return stDim.Render(truncateMiddlePane(s, g.sbW))
 }
 
 func (m model) viewArtifacts(g geometry) string {
 	active := m.focusPanes && m.state == stateBrowse
-	var lines []string
-	if active {
-		lines = append(lines, stHeading.Render(truncate("Artifacts", g.mainW)))
-	} else {
-		lines = append(lines, stDim.Render(truncate("Artifacts", g.mainW)))
+	paneH := m.paneHeight()
+	// The title names the table and, once one is loaded, the repository it
+	// belongs to — a table with no repository above it reads as belonging
+	// to whatever was selected last.
+	title := "Artifacts"
+	if m.repo != "" {
+		title += " · " + truncateMiddlePane(m.repo, max(g.mainW-cellWidth(title)-3, 8))
 	}
+	titleStyle := stDim
+	if active {
+		titleStyle = stAccent
+	}
+	lines := []string{titleStyle.Render(truncatePane(title, g.mainW))}
 
 	switch {
 	case m.op == opFetch:
-		lines = append(lines, m.spinner.View()+" "+stDim.Render("Loading tags…   esc: cancel"))
+		// Six skeleton rows under the real column header, as the design
+		// asks. One spinner line let the table collapse to a single row
+		// and spring back when the data landed; the skeleton keeps the
+		// frame's shape so nothing jumps. The spinner and the esc hint
+		// live in the header while the fetch runs.
+		lines = append(lines, m.tableHeader(g))
+		for range min(6, max(paneH-2, 1)) {
+			lines = append(lines, stDim.Render(m.skeletonRow(g)))
+		}
 	case m.repo == "":
 		lines = append(lines, stDim.Render("No repository loaded."),
 			stDim.Render("Select a shortcut and press enter."))
@@ -219,36 +287,134 @@ func (m model) viewArtifacts(g geometry) string {
 		lines = append(lines, stDim.Render("This repository has no artifacts yet."),
 			stDim.Render("P pushes the first one."))
 	case len(m.visible) == 0:
-		lines = append(lines, stDim.Render(fmt.Sprintf("No tags match %q.", m.filterText)),
+		// The query lands in the copy, so it gets the pane's width: a long
+		// filter would otherwise be measured over the frame's wrap limit
+		// and split onto a second row.
+		lines = append(lines, stDim.Render(truncatePane(fmt.Sprintf("No tags match %q.", m.filterText), g.mainW)),
 			stDim.Render("esc clears the filter."))
 	default:
-		header := stDim.Render("  " + padRight("TAG", g.tagW) + " " + padLeft("SIZE", sizeW) + " " + padRight("ENC", encW) +
-			map[bool]string{true: " " + padRight("VER", g.verW), false: ""}[g.showVer])
-		lines = append(lines, header)
+		lines = append(lines, m.tableHeader(g))
+		shown := 0
 		for i := m.scrollOff; i < len(m.visible) && i < m.scrollOff+g.tagRows; i++ {
-			a := m.visible[i]
-			body := padRight(truncate(a.Tag, g.tagW), g.tagW) + " " +
-				padLeft(formatBytes(a.Size), sizeW) + " " +
-				padRight(map[bool]string{true: "enc", false: "·"}[a.Encrypted], encW)
-			if g.showVer {
-				body += " " + padRight(truncate(a.Version, g.verW), g.verW)
-			}
-			gutter := "  "
-			if i == m.artifactIdx {
-				gutter = "▸ "
-			}
-			line := gutter + body
-			if i == m.artifactIdx {
-				style := stCursorBlur
-				if active {
-					style = stCursor
-				}
-				line = style.Render(padRight(line, g.mainW))
-			}
-			lines = append(lines, line)
+			lines = append(lines, m.artifactRow(g, i))
+			shown++
 		}
+		// The foot answers "is there more above or below" — rows the
+		// window can hold, of rows there are. Pinned to the pane's last
+		// row the same way the sidebar pins its status line.
+		for len(lines) < paneH-1 {
+			lines = append(lines, "")
+		}
+		foot := fmt.Sprintf("%d of %d shown", shown, len(m.artifacts))
+		lines = append(lines, stDim.Render(truncatePane(foot, g.mainW)))
 	}
-	return paneStyle(active, g.mainW, m.paneHeight()).Render(strings.Join(lines, "\n"))
+	return paneStyle(active, g.mainW, paneH).Render(strings.Join(lines, "\n"))
+}
+
+// tableHeader renders the column header. The sorted column carries a
+// direction marker, so the order is readable from the table itself instead
+// of having to be inferred from the rows.
+//
+// The markers are the small triangles (▴ ▾), not the arrows (↑ ↓): the
+// arrows are ambiguous-width and count double on a CJK terminal, which
+// would push this line — built to the frame width exactly — over the pane
+// renderer's wrap limit. The triangles measure one cell in both locales,
+// like ▸ in the row gutter, so the header keeps its exact column widths
+// everywhere.
+func (m model) tableHeader(g geometry) string {
+	tagHdr, sizeHdr := "TAG", "SIZE"
+	switch m.sortBy {
+	case sortSize:
+		sizeHdr = "SIZE ▾"
+	case sortTag:
+		tagHdr = "TAG ▴"
+	}
+	return stDim.Render("  " + padRight(truncatePane(tagHdr, g.tagW), g.tagW) + " " +
+		padLeft(sizeHdr, sizeW) + " " + padRight("ENC", encW) +
+		map[bool]string{true: " " + padRight("VER", g.verW), false: ""}[g.showVer])
+}
+
+// skeletonRow mirrors one table row in placeholder blocks — same column
+// widths, same alignment — so the loading state has the shape of the data
+// that is about to replace it.
+func (m model) skeletonRow(g geometry) string {
+	row := "  " + padRight(strings.Repeat("░", g.tagW), g.tagW) + " " +
+		padLeft(strings.Repeat("░", sizeW), sizeW) + " " +
+		padRight(strings.Repeat("░", encW), encW)
+	if g.showVer {
+		row += " " + padRight(strings.Repeat("░", g.verW), g.verW)
+	}
+	return row
+}
+
+// artifactRow renders one table row.
+//
+// The selected row is deliberately built from plain text: it is drawn
+// reversed, and a colour set inside a reversed run renders as a background —
+// the warn-coloured "enc" would become a yellow slab behind the text
+// instead of a warning. The row keeps the text channel ("enc" vs "·") and
+// the reversal; on unselected rows the full palette applies.
+//
+// Column widths follow tableHeader's rule: everything but the last column
+// holds its exact cell width, and the last column absorbs the row's
+// ambiguous glyphs — the "·" of an unencrypted row, the "…" of a
+// truncated tag — so the line measures within the frame's wrap limit while
+// every column still starts where the header says it does.
+func (m model) artifactRow(g geometry, i int) string {
+	a := m.visible[i]
+	gutter := "  "
+	if i == m.artifactIdx {
+		gutter = "▸ "
+	}
+	enc := "·"
+	if a.Encrypted {
+		enc = "enc"
+	}
+	selected := i == m.artifactIdx
+	head := gutter + padRight(truncatePane(a.Tag, g.tagW), g.tagW) + " " +
+		padLeft(formatBytes(a.Size), sizeW) + " "
+
+	if g.showVer {
+		// The encryption cell holds its exact width — VER's start must
+		// not move between encrypted and plain rows — so the version
+		// column absorbs the row's ambiguous glyphs: the "·" here, the
+		// "…" of a truncated tag in head.
+		encCell := padRight(enc, encW)
+		verBudget := g.verW - amb(head) - amb(encCell)
+		verCell := padWrap(truncatePane(a.Version, verBudget), verBudget)
+		if selected {
+			return m.rowStyle().Render(padWrap(head+encCell+" "+verCell, g.mainW))
+		}
+		return head + m.encStyle(a.Encrypted).Render(encCell) + " " + stDim.Render(verCell)
+	}
+	// No version column: the encryption cell is last, so the debt lands
+	// here instead.
+	encCell := padWrap(enc, encW-amb(head))
+	if selected {
+		return m.rowStyle().Render(padWrap(head+encCell, g.mainW))
+	}
+	return head + m.encStyle(a.Encrypted).Render(encCell)
+}
+
+// rowStyle is the selected row's rendering: reversed, and — when this pane
+// owns the keyboard — bold. The row is built from plain text because a
+// colour set inside a reversed run renders as a background, which would
+// turn the warn-coloured "enc" into a yellow slab.
+func (m model) rowStyle() lipgloss.Style {
+	if m.focusPanes && m.state == stateBrowse {
+		return stCursor
+	}
+	return stCursorBlur
+}
+
+// encStyle is the encryption cell's colour on an unselected row:
+// encryption is the one column worth catching in a glance, so it gets the
+// warning token and everything else stays quiet.
+func (m model) encStyle(encrypted bool) lipgloss.Style {
+	if encrypted {
+		return stWarn
+	}
+	return stDim
 }
 
 func (m model) viewFooter() string {
@@ -274,23 +440,19 @@ func (m model) viewFooter() string {
 // entries are worth keeping: a narrow terminal drops from the end, so what
 // survives is what a first-time user needs first.
 //
-// It carries the keys that move the cursor, open a row, and act on the current
-// repository — and nothing else. Filtering and reloading live on the key table
-// behind "?", because at 80 columns there is room for one or the other, and a
-// footer that has silently shed half its entries teaches nobody which key went
-// missing.
+// It is the design's footer line — navigate, open, pane, push, pull,
+// delete, help, quit. Everything else (`e` labels, `/` filter, `r`
+// reload, `esc` back) lives on the key table behind "?": at 80 columns
+// there is room for one or the other, and a footer that has silently shed
+// half its entries teaches nobody which key went missing.
 func (m model) footerBindings() []key.Binding {
 	k := m.keys
 	if !m.focusPanes {
-		// The sidebar has no row-scoped verbs to offer, so it spends the room
-		// on moving between panes instead.
-		return []key.Binding{k.Up, k.Down, k.Enter, k.Tab, k.Refresh, k.Help, k.Quit}
+		// The sidebar has no row-scoped verbs to offer, so it spends the
+		// room on loading the selected repository instead.
+		return []key.Binding{k.Navigate, k.Enter, k.Tab, k.Refresh, k.Help, k.Quit}
 	}
-	return []key.Binding{
-		k.Up, k.Down, k.Enter,
-		k.Push, k.Pull, k.Delete, k.Edit,
-		k.Filter, k.Refresh, k.Back, k.Help, k.Quit,
-	}
+	return []key.Binding{k.Navigate, k.Enter, k.Tab, k.Push, k.Pull, k.Delete, k.Help, k.Quit}
 }
 
 // untruncatingHelp returns h with its own truncation switched off, so the
@@ -380,7 +542,11 @@ func (m model) viewOverlay() string {
 		if m.confirmYes {
 			no, yes = " No", "❯ Yes"
 		}
-		body := stWarn.Render(m.selectedShortcut().Name+":"+a.Tag) +
+		// The design requires the full repository:tag here, not the
+		// shortcut's name: the line sits above an irreversible warning,
+		// and an abbreviation that could belong to any of several
+		// repositories is exactly the wrong thing to skim.
+		body := stWarn.Render(a.FullName) +
 			"\n\nThis removes the tag from the remote registry and cannot be undone.\n\n" +
 			no + "     " + yes
 		return m.overlay(stHeading.Render("Delete remote artifact?"), body, "←/→: choose   ·   enter: confirm   ·   esc: cancel", colWarn, modalWidth)
@@ -550,7 +716,7 @@ func (m model) helpBody() string {
 		{k.Up, k.Down, k.Top, k.Bottom},
 		{k.Tab, k.BackTab, k.Panel1, k.Panel2},
 		{k.Enter, k.Back, k.Filter, k.Refresh},
-		{k.Push, k.Pull, k.Delete, k.Edit, k.Help, k.Quit},
+		{k.Push, k.Pull, k.Delete, k.Edit, k.Sort, k.Help, k.Quit},
 	})
 }
 
