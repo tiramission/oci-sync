@@ -103,11 +103,33 @@ func Save(cache *ActivityCache) error {
 	if err := os.Chmod(tmpName, 0o644); err != nil {
 		return fmt.Errorf("chmod temp cache file: %w", err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := renameWithRetry(tmpName, path); err != nil {
 		return fmt.Errorf("replace cache file: %w", err)
 	}
 
 	return nil
+}
+
+// renameWithRetry replaces dst with src, tolerating the transient lock a
+// Windows real-time scanner puts on a file it has just seen written: it
+// holds the destination open for a few milliseconds, and
+// rename-over-existing fails while it does. Everywhere else the first
+// rename succeeds and the loop costs nothing. A failure that outlives the
+// retries is returned unchanged.
+func renameWithRetry(src, dst string) error {
+	const attempts = 6
+	backoff := 20 * time.Millisecond
+	var err error
+	for i := range attempts {
+		if err = os.Rename(src, dst); err == nil {
+			return nil
+		}
+		if i < attempts-1 {
+			time.Sleep(backoff)
+			backoff *= 2
+		}
+	}
+	return err
 }
 
 func AddActivity(activity Activity) error {

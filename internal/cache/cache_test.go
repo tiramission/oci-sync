@@ -60,6 +60,47 @@ func TestAddActivityPrependsNewestFirst(t *testing.T) {
 	}
 }
 
+// Save must survive a handle held on the destination for a few
+// milliseconds, the way a Windows real-time scanner holds a just-written
+// cache file open. rename-over-existing fails while it does, and without a
+// retry the activity is dropped from the history even though the push or
+// pull that triggered it succeeded. The lock is released mid-retry, so
+// Save must come back with nil — on other platforms the first rename
+// already succeeds and the lock never matters.
+func TestSaveToleratesTransientLockOnDestination(t *testing.T) {
+	dir := useTempDir(t)
+	path := filepath.Join(dir, CacheFileName)
+	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// An open handle without share-delete is exactly what a scanner
+	// leaves behind: rename cannot replace the destination through it.
+	locked, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- Save(&ActivityCache{Activities: []Activity{{Type: ActivityPush}}})
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	if err := locked.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Save did not return after the lock was released")
+	}
+}
+
 func TestAddActivityTruncatesToMax(t *testing.T) {
 	useTempDir(t)
 

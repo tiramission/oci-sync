@@ -322,7 +322,7 @@ type Activity struct {
 - 默认：`~/.cache/oci-sync/activity.json`
 - 支持 `XDG_CACHE_HOME` 环境变量覆盖
 
-`Save` 先写同目录临时文件再 `os.Rename` 原子替换：直接 `WriteFile` 在进程中途退出时会留下截断的 JSON，导致之后每次 `Load` 都失败。`GetStats` 返回的 `Recent` 是拷贝而非切片别名，避免排序时改写到已加载数据。
+`Save` 先写同目录临时文件再 `os.Rename` 原子替换：直接 `WriteFile` 在进程中途退出时会留下截断的 JSON，导致之后每次 `Load` 都失败。Windows 上实时扫描器会短暂持有刚写出的目标文件，rename 覆盖在此期间失败，因此替换带有限次重试（20ms 起步的倍增退避，约 620ms 窗口）；其他平台首次即成功，重试不产生开销。`GetStats` 返回的 `Recent` 是拷贝而非切片别名，避免排序时改写到已加载数据。
 
 ### 4.5 `internal/xdg` — XDG 目录规范
 
