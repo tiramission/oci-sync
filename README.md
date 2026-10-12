@@ -199,16 +199,16 @@ oci-sync recent --clear
 
 ### tui — 全屏交互式 TUI 管理
 
-使用全屏分栏终端界面以极佳的视觉交互管理快捷仓库和 artifacts。
+使用全屏分栏终端界面管理快捷仓库和 artifacts：左侧 shortcuts 列表、右侧 tags/artifacts 表格，`Enter` 加载仓库或查看详情（Full Name、Digest、Version、Size、Encryption 状态和 Labels）；窄终端（<76 列）自动折叠为单栏。除浏览外还支持拉取（弹窗实时显示进度与阶段，`Esc` 可取消）、推送、删除和标签编辑。
 
 ```bash
 # 启动 TUI 界面
 oci-sync tui
 ```
 
-- **分栏结构**：左侧 shortcuts 列表（底部显示当前仓库与 tag 数）、右侧仓库 tags/artifacts 表格（含加密列与 `n of m shown` 页脚），顶部单行显示当前仓库、计数与过滤输入，底部按上下文显示快捷键提示；选中 artifact 按 `Enter` 查看完整元数据（Full Name、Digest、Version、Size、Encryption 状态和 Labels），`s` 可按大小/标签排序。窄终端（<76 列）自动折叠为单栏。
-- **拉取进度**：pull 弹窗实时显示下载进度条（百分比 + 已下载/总大小）与当前阶段（解析 / 下载 / 解密 / 解包），进行中可随时 `Esc` 取消。
-- **极简操作**：`Tab`/`1`/`2` 切换分栏焦点，`↑↓` 或 `k`/`j` 导航，`Enter` 加载/查看详情，`/` 过滤 tags，`p` 拉取/解密（弹窗输入本地路径与密码），`d` 删除（弹窗确认，默认取消），`r` 刷新，`?` 查看全部快捷键，`Esc` 取消进行中的操作或逐级返回。
+- **交互细节**：`s` 在 registry 顺序 / 大小降序 / 标签升序之间循环排序（选中行跟随移动）；列举期间表格在真实列头下显示骨架行，刷新不跳动；侧栏与表格底部钉有状态页脚（已加载仓库与 tag 数、`n of m shown`），顶部单行同时显示过滤中的查询。
+
+界面内按 `?` 可随时查看全部快捷键；完整键位表与交互设计见 [docs/design.md](docs/design.md) 第 7 节。
 
 ### gui — 原生桌面 GUI
 
